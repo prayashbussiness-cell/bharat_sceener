@@ -9,7 +9,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import app.engine_core as engine
+import backend.engine_core as engine
 
 rng = np.random.default_rng(3)
 
@@ -112,7 +112,7 @@ def test_pipeline():
 def test_gemini_fallback():
     """No GEMINI_API_KEY set -> must degrade gracefully, not raise."""
     os.environ.pop("GEMINI_API_KEY", None)
-    from app.gemini_summary import generate_commentary
+    from backend.gemini_summary import generate_commentary
     picks = [{"symbol": "STK000", "name": "Company STK000", "sector": "Technology",
              "SCORE": 88.5, "score_growth": 1.1, "score_quality": 0.8,
              "score_value": -0.2, "score_momentum": 1.4, "score_risk": 0.3,
@@ -126,7 +126,7 @@ def test_gemini_fallback():
 def test_web_job_flow():
     """Exercise the FastAPI app's job lifecycle with run_screen mocked out,
     so this test needs no network and no real Gemini key."""
-    import app.main as web
+    import backend.main as web
 
     def fake_run_screen(**kwargs):
         time.sleep(0.05)

@@ -18,7 +18,7 @@ pick — grounded strictly in the numbers the engine computed, nothing else.
 
 No blueprint? Manually create a Web Service with:
 - Build command: `pip install -r requirements.txt`
-- Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- Start command: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
 - Env var: `GEMINI_API_KEY`
 
 ## Run locally
@@ -27,7 +27,7 @@ No blueprint? Manually create a Web Service with:
 pip install -r requirements.txt
 cp .env.example .env        # fill in GEMINI_API_KEY
 export $(cat .env | grep -v '^#' | xargs)   # or use python-dotenv / direnv
-uvicorn app.main:app --reload
+uvicorn backend.main:app --reload
 ```
 
 Open http://localhost:8000 and click the button. Or use the original CLI:

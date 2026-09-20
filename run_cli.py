@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""CLI wrapper around app.engine_core.run_screen() - unchanged usage from before."""
+"""CLI wrapper around backend.engine_core.run_screen() - unchanged usage from before."""
 import argparse
 import json
 
-from app.engine_core import run_screen, BUCKET_WEIGHTS, UNIVERSE_URLS
+from backend.engine_core import run_screen, BUCKET_WEIGHTS, UNIVERSE_URLS
 
 
 def main():
