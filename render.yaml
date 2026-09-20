@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: bharat-top-performers
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: ENABLE_GEMINI
+        value: "true"
+      - key: SCREEN_UNIVERSE
+        value: nifty250
+      - key: SCREEN_TOP_N
+        value: "15"
+      - key: SCREEN_MAX_PER_SECTOR
+        value: "4"
+      - key: SCREEN_FAST_MODE
+        value: "false"
+      - key: PYTHON_VERSION
+        value: 3.12.3
