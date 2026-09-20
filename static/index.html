@@ -81,6 +81,83 @@
   button.run:hover{background:#eeb654;}
   button.run:active{transform:scale(.98);}
   button.run:disabled{background:var(--ink-raised);color:var(--paper-dim);cursor:progress;}
+  button.run.quick{background:transparent;color:var(--paper);border:1px solid var(--hair);}
+  button.run.quick:hover{background:var(--ink-raised);}
+
+  .banner{
+    display:none;
+    margin-top:20px;
+    padding:12px 16px;
+    border:1px solid var(--marigold-dim);
+    border-radius:var(--radius);
+    font-size:13.5px;
+    color:var(--marigold);
+    background:rgba(227,167,58,0.08);
+  }
+  .banner.show{display:block;}
+
+  details.rules{
+    margin-top:22px;
+    font-size:13.5px;
+    color:var(--paper-dim);
+  }
+  details.rules summary{
+    cursor:pointer;
+    color:var(--paper);
+    font-weight:500;
+    padding:4px 0;
+  }
+  .rules-body{padding:12px 0 4px;}
+  .rules-body table{border-collapse:collapse;width:100%;max-width:520px;}
+  .rules-body td{
+    padding:5px 10px 5px 0;
+    border-bottom:1px solid var(--hair);
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12.5px;
+  }
+  .rules-body td:first-child{color:var(--paper-dim);font-family:'Work Sans',sans-serif;}
+  .rules-body .exempt-note{
+    margin-top:10px;
+    font-size:12.5px;
+    color:var(--marigold-dim);
+  }
+
+  .lookup{
+    margin-top:18px;
+    display:flex;
+    gap:10px;
+  }
+  .lookup input{
+    background:var(--ink-raised);
+    border:1px solid var(--hair);
+    color:var(--paper);
+    font-family:'IBM Plex Mono',monospace;
+    font-size:13px;
+    padding:9px 12px;
+    border-radius:var(--radius);
+    width:260px;
+  }
+  .lookup input:focus{outline:1px solid var(--marigold-dim);}
+  .lookup button{
+    background:transparent;
+    border:1px solid var(--hair);
+    color:var(--paper);
+    font-family:'Work Sans',sans-serif;
+    font-size:13px;
+    padding:9px 16px;
+    border-radius:var(--radius);
+    cursor:pointer;
+  }
+  .lookup button:hover{background:var(--ink-raised);}
+  .lookup-result{
+    margin-top:12px;
+    font-size:13.5px;
+    color:var(--paper-dim);
+    max-width:60ch;
+  }
+  .lookup-result .lr-eligible{color:var(--jade);}
+  .lookup-result .lr-ineligible{color:var(--rose);}
+  .lookup-result b{color:var(--paper);font-weight:500;}
 
   .status-line{
     font-size:14px;
@@ -210,10 +287,24 @@
     </p>
     <div class="controls">
       <button class="run" id="runBtn">Run today's scan</button>
+      <button class="run quick" id="quickBtn">Quick scan (30 stocks, ~1 min)</button>
       <div class="status-line"><span class="dot" id="statusDot"></span><span id="statusText">Not run yet</span></div>
     </div>
     <div class="meta" id="metaRow"></div>
+
+    <details class="rules">
+      <summary>Screening rules used this run</summary>
+      <div id="rulesBody" class="rules-body">Loading…</div>
+    </details>
+
+    <div class="lookup">
+      <input type="text" id="lookupInput" placeholder="Check a specific stock, e.g. ICICIBANK" autocomplete="off">
+      <button id="lookupBtn">Check</button>
+    </div>
+    <div id="lookupResult" class="lookup-result"></div>
   </header>
+
+  <section class="banner" id="modeBanner"></section>
 
   <section class="overall" id="overallSection">
     <p id="overallText"></p>
@@ -239,12 +330,14 @@
 
 <script>
 const runBtn = document.getElementById('runBtn');
+const quickBtn = document.getElementById('quickBtn');
 const statusDot = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
 const listEl = document.getElementById('list');
 const metaRow = document.getElementById('metaRow');
 const overallSection = document.getElementById('overallSection');
 const overallText = document.getElementById('overallText');
+const modeBanner = document.getElementById('modeBanner');
 
 let polling = null;
 
@@ -264,29 +357,33 @@ async function pollStatus(){
   statusDot.className = 'dot ' + s.status;
   if(s.status === 'running'){
     statusText.textContent = s.progress || 'Running…';
-    runBtn.disabled = true;
+    runBtn.disabled = true; quickBtn.disabled = true;
   } else if(s.status === 'done'){
     statusText.textContent = 'Last run complete';
-    runBtn.disabled = false;
+    runBtn.disabled = false; quickBtn.disabled = false;
     clearInterval(polling);
     const rr = await fetch('/api/results');
     render(await rr.json());
   } else if(s.status === 'error'){
     statusText.textContent = 'Failed: ' + (s.error || 'unknown error');
-    runBtn.disabled = false;
+    runBtn.disabled = false; quickBtn.disabled = false;
     clearInterval(polling);
   } else {
-    runBtn.disabled = false;
+    runBtn.disabled = false; quickBtn.disabled = false;
   }
 }
 
-runBtn.addEventListener('click', async () => {
-  runBtn.disabled = true;
+async function startRun(mode){
+  runBtn.disabled = true; quickBtn.disabled = true;
   statusText.textContent = 'Starting…';
   statusDot.className = 'dot running';
-  await fetch('/api/run', {method:'POST'});
+  modeBanner.classList.remove('show');
+  await fetch('/api/run?mode=' + mode, {method:'POST'});
   polling = setInterval(pollStatus, 1800);
-});
+}
+
+runBtn.addEventListener('click', () => startRun('default'));
+quickBtn.addEventListener('click', () => startRun('quick'));
 
 function render(data){
   metaRow.innerHTML = `
@@ -295,10 +392,21 @@ function render(data){
     <div>as of <b>${data.generated_at || ''}</b></div>
   `;
 
+  if(data.data_mode === 'momentum_only_fallback'){
+    modeBanner.textContent = "Yahoo's fundamentals data wasn't reachable from this server this run, so these results are ranked on price momentum alone (growth/quality/value scores are empty). Fundamentals scoring will resume automatically once reachable.";
+    modeBanner.classList.add('show');
+  } else if(data.data_mode === 'fast'){
+    modeBanner.textContent = "Fast mode: momentum-only scan, fundamentals were skipped on purpose.";
+    modeBanner.classList.add('show');
+  } else {
+    modeBanner.classList.remove('show');
+  }
+
   if(data.commentary && data.commentary.overall){
     overallText.textContent = data.commentary.overall;
     overallSection.classList.add('show');
   }
+
 
   if(!data.picks || !data.picks.length){
     listEl.innerHTML = '<div class="empty">No stocks passed the eligibility rules this run.</div>';
@@ -337,6 +445,69 @@ function render(data){
 
 loadCachedResults();
 pollStatus();
+
+// --- Screening rules panel, pulled live from the running config ------------
+async function loadRules(){
+  try{
+    const r = await fetch('/api/config');
+    const c = await r.json();
+    const rules = c.eligibility_rules || {};
+    const exemptSectors = (rules.skip_leverage_checks_for_sectors || []).join(', ');
+    const rows = [
+      ['Market cap', '≥ ₹' + rules.min_market_cap_cr + ' cr'],
+      ['60-day avg traded value', '≥ ₹' + rules.min_adtv_cr + ' cr'],
+      ['Price', '≥ ₹' + rules.min_price],
+      ['Listed history', '≥ ' + rules.min_history_days + ' trading days'],
+      ['Debt / equity', '≤ ' + rules.max_debt_to_equity + '%'],
+      ['Interest coverage', '≥ ' + rules.min_interest_coverage + '×'],
+      ['Shareholders\' equity', rules.require_positive_equity ? '> 0' : 'not checked'],
+      ['EBITDA', rules.require_positive_ebitda ? '> 0' : 'not checked'],
+    ];
+    document.getElementById('rulesBody').innerHTML =
+      '<table>' + rows.map(([k,v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('') + '</table>' +
+      (exemptSectors ? `<div class="exempt-note">Debt/equity and interest coverage are not applied to: ${exemptSectors} — deposits/customer liabilities make those ratios structurally different for lenders, not a sign of distress.</div>` : '');
+  }catch(e){
+    document.getElementById('rulesBody').textContent = 'Could not load rules.';
+  }
+}
+loadRules();
+
+// --- Stock lookup: "why isn't X in the list" -------------------------------
+const lookupInput = document.getElementById('lookupInput');
+const lookupBtn = document.getElementById('lookupBtn');
+const lookupResult = document.getElementById('lookupResult');
+
+async function doLookup(){
+  const sym = lookupInput.value.trim().toUpperCase();
+  if(!sym) return;
+  lookupResult.textContent = 'Checking…';
+  try{
+    const r = await fetch('/api/lookup/' + encodeURIComponent(sym));
+    if(r.status === 404){
+      const j = await r.json();
+      lookupResult.textContent = j.detail;
+      return;
+    }
+    const d = await r.json();
+    if(d.eligible){
+      lookupResult.innerHTML = `<span class="lr-eligible"><b>${d.symbol}</b> — eligible</span>` +
+        (d.SCORE !== null && d.SCORE !== undefined
+          ? ` · score <b>${Number(d.SCORE).toFixed(1)}</b>/100` +
+            (d.made_top_n ? ' · in this run\'s top picks' : ' · scored but did not make the top-N cut this run')
+          : ' · not yet scored') +
+        (d.sector ? ` · sector: ${d.sector}` : '');
+    } else {
+      lookupResult.innerHTML = `<span class="lr-ineligible"><b>${d.symbol}</b> — excluded</span>` +
+        (d.fail_reasons ? ` · failed: <b>${d.fail_reasons}</b>` : '') +
+        (d.sector ? ` · sector: ${d.sector}` : '');
+    }
+  }catch(e){
+    lookupResult.textContent = 'Lookup failed - is a scan cached yet?';
+  }
+}
+lookupBtn.addEventListener('click', doLookup);
+lookupInput.addEventListener('keydown', e => { if(e.key === 'Enter') doLookup(); });
+
 </script>
 </body>
 </html>

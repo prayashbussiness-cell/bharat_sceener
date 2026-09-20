@@ -51,6 +51,10 @@ news, price targets, or opinions about the company that are not derivable \
 from this data.
 - For each stock, write exactly one sentence explaining WHY it scored where \
 it did, referencing its strongest 1-2 sub-scores or metrics by name.
+- If a stock's data_coverage is below 0.7, or a sub-score is missing, say so \
+plainly in that stock's sentence (e.g. "scored mainly on momentum - value \
+and quality data was unavailable this run") instead of treating it as a \
+fully-informed pick.
 - Then write one short overall paragraph (3-4 sentences) describing the \
 shape of today's list as a whole (e.g. which buckets are driving the top \
 names, any sector concentration visible in the data, anything that stands \

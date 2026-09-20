@@ -5,10 +5,12 @@ import json
 
 from backend.engine_core import run_screen, BUCKET_WEIGHTS, UNIVERSE_URLS
 
+UNIVERSE_CHOICES = list(UNIVERSE_URLS) + ["quicklist"]
+
 
 def main():
     p = argparse.ArgumentParser(description="Bharat Outperformer-style Indian equity screener")
-    p.add_argument("--universe", default="nifty250", choices=list(UNIVERSE_URLS))
+    p.add_argument("--universe", default="nifty250", choices=UNIVERSE_CHOICES)
     p.add_argument("--universe-csv", default=None)
     p.add_argument("--top", type=int, default=20)
     p.add_argument("--out", default=None)

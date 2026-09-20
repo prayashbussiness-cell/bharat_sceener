@@ -21,12 +21,13 @@ import time
 import traceback
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.engine_core import run_screen, BUCKET_WEIGHTS
+
 from backend.gemini_summary import generate_commentary
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -66,7 +67,7 @@ def _log(msg: str) -> None:
     print(f"[screen] {msg}", flush=True)
 
 
-def _run_job() -> None:
+def _run_job(universe: str, fast: bool) -> None:
     with _lock:
         if _job["status"] == "running":
             return
@@ -74,7 +75,7 @@ def _run_job() -> None:
                     finished_at=None, error=None)
     try:
         result = run_screen(
-            universe=UNIVERSE, top=TOP_N, fast=FAST_MODE,
+            universe=universe, top=TOP_N, fast=fast,
             max_per_sector=MAX_PER_SECTOR, weights=BUCKET_WEIGHTS, log=_log,
         )
         if ENABLE_GEMINI and result["picks"]:
@@ -104,13 +105,23 @@ def api_status():
 
 
 @app.post("/api/run")
-def api_run():
+def api_run(mode: str = Query("default", enum=["default", "quick", "fast"])):
+    """
+    mode=default -> configured universe (SCREEN_UNIVERSE), full scoring
+    mode=quick   -> ~30-stock curated watchlist, no NSE download, full scoring
+                    (fast to run, small universe - good for testing the button
+                    and Gemini wiring without waiting on a 250-stock scan)
+    mode=fast    -> configured universe, momentum-only (skips fundamentals
+                    entirely, so no dependence on Yahoo's crumb-gated endpoints)
+    """
     with _lock:
         if _job["status"] == "running":
             return {"started": False, "reason": "already running", **_job}
-    t = threading.Thread(target=_run_job, daemon=True)
+    universe = "quicklist" if mode == "quick" else UNIVERSE
+    fast = True if mode == "fast" else FAST_MODE
+    t = threading.Thread(target=_run_job, args=(universe, fast), daemon=True)
     t.start()
-    return {"started": True}
+    return {"started": True, "mode": mode, "universe": universe, "fast": fast}
 
 
 @app.get("/api/results")
@@ -121,8 +132,34 @@ def api_results():
         return json.load(f)
 
 
+@app.get("/api/lookup/{symbol}")
+def api_lookup(symbol: str):
+    """Answers 'why isn't <symbol> in the list' directly: eligible or not,
+    which rule it failed if not, and its full score breakdown if it was
+    scored - regardless of whether it made the final top N.
+    """
+    if not os.path.exists(RESULT_FILE):
+        raise HTTPException(404, "No completed scan yet - POST /api/run first")
+    with open(RESULT_FILE) as f:
+        data = json.load(f)
+    lookup = data.get("lookup", {})
+    sym = symbol.strip().upper()
+    if sym not in lookup:
+        raise HTTPException(404, f"'{sym}' was not in the scanned universe "
+                            f"({data.get('universe')}, {data.get('universe_size')} names) "
+                            "for this run.")
+    return {"symbol": sym, "scan_generated_at": data.get("generated_at"), **lookup[sym]}
+
+
 @app.get("/api/config")
 def api_config():
+    from dataclasses import asdict
+    from backend.engine_core import Eligibility, FACTORS
+    rules = asdict(Eligibility())
+    factors_by_bucket: dict[str, list[str]] = {}
+    for col, higher, bucket in FACTORS:
+        factors_by_bucket.setdefault(bucket, []).append(
+            f"{col} ({'higher is better' if higher else 'lower is better'})")
     return {
         "universe": UNIVERSE,
         "top_n": TOP_N,
@@ -130,6 +167,8 @@ def api_config():
         "fast_mode": FAST_MODE,
         "gemini_enabled": ENABLE_GEMINI,
         "weights": BUCKET_WEIGHTS,
+        "eligibility_rules": rules,
+        "factors_by_bucket": factors_by_bucket,
     }
 
 

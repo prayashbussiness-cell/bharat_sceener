@@ -42,10 +42,11 @@ def fake_price_factors(data, symbols):
         "dist_52w_high": -rng.uniform(0, 0.3, n),
         "vol_12m": rng.uniform(0.15, 0.6, n),
         "max_drawdown_1y": -rng.uniform(0.05, 0.4, n),
+        "golden_cross_num": rng.choice([0.0, 1.0], n),
     }).set_index("symbol")
 
 
-def fake_fetch_fundamentals(symbols, sleep=0.0):
+def fake_fetch_fundamentals(symbols, sleep=0.0, max_workers=10, log=print):
     n = len(symbols)
     df = pd.DataFrame({
         "symbol": symbols,
@@ -61,6 +62,7 @@ def fake_fetch_fundamentals(symbols, sleep=0.0):
         "rev_cagr_3y": rng.normal(0.09, 0.06, n),
         "eps_growth_yoy": rng.normal(0.12, 0.1, n),
         "eps_cagr_3y": rng.normal(0.1, 0.07, n),
+        "eps_acceleration": rng.normal(0, 0.05, n),
         "ebitda_growth_yoy": rng.normal(0.1, 0.08, n),
         "roce": rng.uniform(0.05, 0.35, n),
         "roe": rng.uniform(0.05, 0.3, n),
@@ -85,12 +87,14 @@ def test_pipeline():
     engine.fetch_prices = fake_fetch_prices
     engine.price_factors = fake_price_factors
     engine.fetch_fundamentals = fake_fetch_fundamentals
+    engine.fundamentals_available = lambda probe_symbol="RELIANCE": True
 
     result = engine.run_screen(universe="nifty250", top=10, fast=False,
                                max_per_sector=3, cache_hours=0, log=lambda m: None)
 
     assert result["universe_size"] == 40
     assert result["eligible_count"] > 0
+    assert result["data_mode"] == "full"
     assert 1 <= len(result["picks"]) <= 10
     for p in result["picks"]:
         assert 0 <= p["SCORE"] <= 100
@@ -101,12 +105,85 @@ def test_pipeline():
     c = Counter(p["sector"] for p in result["picks"])
     assert max(c.values()) <= 3, c
 
+    # lookup covers every scanned symbol, not just the top N
+    assert len(result["lookup"]) == 40
+    for sym, entry in result["lookup"].items():
+        assert "eligible" in entry and "sector" in entry
+        if entry["eligible"]:
+            assert entry["SCORE"] is not None
+        else:
+            assert entry["fail_reasons"]  # ineligible names must say why
+
     # JSON-serialisable (this is what the web app writes to disk / returns)
     json.dumps(result, default=str)
     print(f"run_screen OK: {result['eligible_count']} eligible, "
           f"{len(result['picks'])} picks, top score "
-          f"{result['picks'][0]['SCORE']}")
+          f"{result['picks'][0]['SCORE']}, lookup has {len(result['lookup'])} entries")
     return result
+
+
+def test_bank_leverage_exemption():
+    """A bank with a 600% D/E (normal - deposits are liabilities) must not
+    be disqualified by the leverage rule; a non-bank with the same D/E must
+    still fail it. This is the exact bug that excluded ICICI Bank-style
+    names in production."""
+    df = pd.DataFrame({
+        "sector": ["Financial Services", "Industrials"],
+        "market_cap_cr": [500000, 5000],
+        "adtv_cr": [50, 10],
+        "price": [1200, 800],
+        "n_days": [1000, 1000],
+        "debt_to_equity": [650, 650],       # identical, deliberately
+        "interest_coverage": [0.9, 0.9],    # identical, deliberately
+        "total_equity": [1e11, 1e9],
+        "ebitda": [5e10, 5e8],
+    }, index=["SOMEBANK", "SOMEINDUSTRIAL"])
+
+    out = engine.apply_eligibility(df.copy(), engine.Eligibility())
+    assert out.loc["SOMEBANK", "eligible"] == True, \
+        f"bank wrongly excluded: {out.loc['SOMEBANK', 'fail_reasons']}"
+    assert out.loc["SOMEINDUSTRIAL", "eligible"] == False
+    assert "leverage" in out.loc["SOMEINDUSTRIAL", "fail_reasons"]
+    print("Bank leverage exemption OK: same D/E, different sectors, different outcome")
+
+
+def test_fundamentals_blocked_fallback():
+    """This is the exact failure mode seen in production: Yahoo's crumb-gated
+    endpoints return 401 for every symbol. The preflight check must catch
+    this ONCE (not after grinding through the whole universe) and fall back
+    to momentum-only scoring, tagging the result so the UI can say why."""
+    engine.load_universe = fake_load_universe
+    engine.fetch_prices = fake_fetch_prices
+    engine.price_factors = fake_price_factors
+    engine.fundamentals_available = lambda probe_symbol="RELIANCE": False
+
+    calls = {"n": 0}
+    def fail_if_called(*a, **k):
+        calls["n"] += 1
+        raise AssertionError("fetch_fundamentals must not be called when preflight fails")
+    engine.fetch_fundamentals = fail_if_called
+
+    result = engine.run_screen(universe="nifty250", top=10, fast=False,
+                               max_per_sector=3, cache_hours=0, log=lambda m: None)
+
+    assert calls["n"] == 0, "fetch_fundamentals was called despite failed preflight"
+    assert result["data_mode"] == "momentum_only_fallback"
+    assert result["eligible_count"] > 0, "price-only eligibility should still pass most names"
+    assert len(result["picks"]) > 0
+    for p in result["picks"]:
+        # quality/value scores should be absent/None since no fundamentals came in
+        assert p.get("roce") is None
+    print(f"Fallback OK: preflight caught the block with 0 wasted per-symbol calls, "
+          f"data_mode={result['data_mode']}, {len(result['picks'])} momentum-only picks")
+
+
+def test_quicklist_universe_bypasses_nse():
+    """quicklist must not touch load_universe's network path at all."""
+    from backend.engine_core import load_universe, QUICK_WATCHLIST
+    df = load_universe("quicklist")
+    assert len(df) == len(QUICK_WATCHLIST)
+    assert set(df["symbol"]) == set(QUICK_WATCHLIST)
+    print(f"Quicklist OK: {len(df)} symbols, no network call required")
 
 
 def test_gemini_fallback():
@@ -157,6 +234,13 @@ def test_web_job_flow():
     r = client.get("/healthz")
     assert r.json() == {"ok": True}
 
+    r = client.get("/api/config")
+    cfg = r.json()
+    assert cfg["eligibility_rules"]["max_debt_to_equity"] == 300.0
+    assert "Financial Services" in cfg["eligibility_rules"]["skip_leverage_checks_for_sectors"]
+    assert "growth" in cfg["factors_by_bucket"]
+    print("Config endpoint OK: eligibility rules and factor list exposed dynamically")
+
     r = client.post("/api/run")
     assert r.json()["started"] is True
 
@@ -180,7 +264,10 @@ def test_web_job_flow():
 
 
 if __name__ == "__main__":
+    test_quicklist_universe_bypasses_nse()
+    test_bank_leverage_exemption()
     test_pipeline()
+    test_fundamentals_blocked_fallback()
     test_gemini_fallback()
     test_web_job_flow()
     print("\nALL INTEGRATION TESTS PASSED")

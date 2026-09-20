@@ -108,3 +108,59 @@ back to showing raw scores with no commentary rather than breaking the page.
   in the original screener README, they still apply here
 - Persisting scan history (e.g. to Supabase, if you want to reuse the
   project pattern from PalmAI) instead of only keeping the latest run
+
+## Fixes and additions since the first version
+
+**Bug fix: banks were being wrongly excluded.** Yahoo reports a bank's
+customer deposits as balance-sheet "debt," so `debtToEquity` for a healthy
+bank routinely reads 400-900%+ - nothing to do with financial distress, just
+how banking works. The debt/equity and interest-coverage eligibility checks
+now skip `Financial Services` entirely (`Eligibility.skip_leverage_checks_for_sectors`).
+Verified with a test that gives a bank and a non-financial company an
+identical D/E and confirms only the non-financial one gets excluded.
+
+**Bug fix: Yahoo fundamentals timing out.** Yahoo's crumb-gated fundamentals
+endpoints get blocked from cloud IPs the same way NSE blocks the constituent
+list. Previously the app would grind through all 250 names discovering this
+one-by-one, taking many minutes and producing nothing visible. It now runs
+one preflight check first - if fundamentals are blocked, it falls back to
+momentum-only scoring immediately instead of wasting the time, and the UI
+shows a banner explaining why. Fundamentals fetching is also parallelized
+(`ThreadPoolExecutor`) for the runs where it does work.
+
+**New: "why isn't X in the list" lookup.** `GET /api/lookup/{symbol}` (and a
+search box on the page) tells you directly whether a stock was eligible, why
+not if it wasn't, and its full score breakdown if it was - whether or not it
+made the final top N.
+
+**New: the actual screening thresholds are on the page**, pulled live from
+`/api/config` (which introspects the `Eligibility` dataclass directly), so
+the displayed rules can never drift out of sync with what the code enforces.
+
+**New: `quicklist` universe.** A ~30-stock curated watchlist that skips the
+NSE download entirely. Use the "Quick scan" button, or `mode=quick` on
+`POST /api/run`, for a sub-minute sanity check instead of waiting on a full
+250-stock scan.
+
+**New factors, from a supplied factor-importance sheet:**
+- `golden_cross_num` (Momentum) - the "50 DMA > 200 DMA" trend signal was
+  already computed but wasn't feeding the score; now it does.
+- `eps_acceleration` (Growth) - an annual proxy for "is EPS growth speeding
+  up or fading," computed as this year's growth minus the 3-year CAGR. A
+  cleaner quarter-over-quarter version would need quarterly statements,
+  which are exposed to the same Yahoo-blocking risk as everything else here.
+
+**Factors considered and deliberately left out:** ROIC (needs an invested-
+capital breakdown Yahoo doesn't cleanly expose for Indian filings), earnings
+estimate revisions (needs analyst consensus history, not reliably available
+free), and promoter pledge (still requires the manual `pledge_overrides.csv`
+- no free reliable source found).
+
+**On using Gemini to do the filtering itself:** deliberately not done. The
+screen's value depends on being reproducible and auditable - same inputs,
+same output, and you can trace exactly why a stock ranked where it did. An
+LLM making filtering decisions adds variance and occasional hallucination to
+that, which is the wrong trade-off for something informing real money
+decisions. Gemini's role stays explanatory: it now also flags in its
+commentary when a pick's `data_coverage` is low or a sub-score is missing,
+so a thin-data pick doesn't read as a fully-informed one.

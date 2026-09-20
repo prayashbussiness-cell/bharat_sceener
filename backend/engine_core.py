@@ -44,6 +44,18 @@ UNIVERSE_URLS = {
     "midsmall400": "https://nsearchives.nseindia.com/content/indices/ind_niftymidsmallcap400list.csv",
 }
 
+# "quicklist" needs no NSE download at all - useful when NSE is blocking the
+# server's IP (see load_universe), or just for a fast sub-minute test/demo run.
+# It's the same ~30 large, liquid names across sectors used as a sanity-check
+# watchlist, not a substitute for scanning the full index.
+QUICK_WATCHLIST = [
+    "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "BHARTIARTL", "SBIN",
+    "ITC", "HINDUNILVR", "LT", "KOTAKBANK", "BAJFINANCE", "AXISBANK", "MARUTI",
+    "SUNPHARMA", "HCLTECH", "TITAN", "ULTRACEMCO", "ASIANPAINT", "TATAMOTORS",
+    "JSWSTEEL", "NTPC", "POWERGRID", "M&M", "WIPRO", "NESTLEIND", "TATASTEEL",
+    "ADANIENT", "DIVISLAB", "CIPLA",
+]
+
 
 # ----------------------------------------------------------------------------
 # Stage 1 - eligibility rules (hard filters, applied before any scoring)
@@ -59,6 +71,14 @@ class Eligibility:
     require_positive_equity: bool = True
     require_positive_ebitda: bool = True
     exclude_sectors: list[str] = field(default_factory=list)
+    # Banks/NBFCs carry customer deposits as balance-sheet liabilities, so
+    # Yahoo's debt/equity for them routinely reads 400-900%+ - that's how
+    # banking works, not distress. Applying a manufacturing-style leverage
+    # cap to them was silently disqualifying every healthy bank before
+    # scoring even started. Same logic for interest coverage: a bank's
+    # "interest expense" is its cost of deposits, not debt service risk.
+    skip_leverage_checks_for_sectors: list[str] = field(
+        default_factory=lambda: ["Financial Services"])
 
 
 # ----------------------------------------------------------------------------
@@ -74,6 +94,7 @@ FACTORS = [
     ("eps_growth_yoy",      True,  "growth"),
     ("eps_cagr_3y",         True,  "growth"),
     ("ebitda_growth_yoy",   True,  "growth"),
+    ("eps_acceleration",    True,  "growth"),     # is growth speeding up or fading
 
     # --- Quality (25%) ------------------------------------------------------
     ("roce",                True,  "quality"),
@@ -94,12 +115,13 @@ FACTORS = [
 
     # --- Momentum (25%) -----------------------------------------------------
     ("rs_6m",               True,  "momentum"),    # 6m return minus benchmark
-    ("rs_12m",              True,  "momentum"),
-    ("ret_3m",              True,  "momentum"),
+    ("rs_12m",               True, "momentum"),
+    ("ret_3m",               True, "momentum"),
     ("px_vs_200dma",        True,  "momentum"),
     ("slope_200dma",        True,  "momentum"),
     ("dist_52w_high",       True,  "momentum"),    # negative number, closer to 0 = better
     ("vol_12m",             False, "momentum"),    # lower realised vol preferred
+    ("golden_cross_num",    True,  "momentum"),    # "50 DMA > 200 DMA" trend signal
 
     # --- Risk / ownership (10%) --------------------------------------------
     ("promoter_pledge_pct", False, "risk"),        # needs pledge_overrides.csv
@@ -129,6 +151,13 @@ def load_universe(name: str, custom_csv: str | None = None) -> pd.DataFrame:
         out["name"] = df.get("Company Name", out["symbol"])
         out["nse_sector"] = df.get("Industry", "Unknown")
         return out
+
+    if name == "quicklist":
+        return pd.DataFrame({
+            "symbol": QUICK_WATCHLIST,
+            "name": QUICK_WATCHLIST,
+            "nse_sector": "Unknown",
+        })
 
     url = UNIVERSE_URLS[name]
     import requests
@@ -244,6 +273,11 @@ def price_factors(data: pd.DataFrame, symbols: list[str]) -> pd.DataFrame:
         roll_max = px.tail(252).cummax()
         mdd = float((px.tail(252) / roll_max - 1).min()) if len(px) >= 30 else None
 
+        golden_cross = (
+            bool(dma50.iloc[-1] > dma200.iloc[-1])
+            if pd.notna(dma50.iloc[-1]) and pd.notna(dma200.iloc[-1]) else None
+        )
+
         rows.append({
             "symbol": sym,
             "n_days": len(px),
@@ -254,10 +288,10 @@ def price_factors(data: pd.DataFrame, symbols: list[str]) -> pd.DataFrame:
             "rs_12m": None if r12 is None else r12 - b12,
             "px_vs_200dma": (last / float(dma200.iloc[-1]) - 1) if pd.notna(dma200.iloc[-1]) else None,
             "px_vs_50dma": (last / float(dma50.iloc[-1]) - 1) if pd.notna(dma50.iloc[-1]) else None,
-            "golden_cross": (
-                bool(dma50.iloc[-1] > dma200.iloc[-1])
-                if pd.notna(dma50.iloc[-1]) and pd.notna(dma200.iloc[-1]) else None
-            ),
+            "golden_cross": golden_cross,
+            # numeric form (1.0/0.0) so the scorer can use it as a factor;
+            # "50 DMA > 200 DMA" from the factor sheet - a trend-following signal
+            "golden_cross_num": None if golden_cross is None else (1.0 if golden_cross else 0.0),
             "slope_200dma": slope200,
             "dist_52w_high": last / hi52 - 1 if hi52 else None,
             "vol_12m": float(daily.std() * np.sqrt(252)) if len(daily) > 60 else None,
@@ -328,126 +362,166 @@ def _growth(s: pd.Series | None) -> float | None:
     return new / abs(old) - 1
 
 
-def fetch_fundamentals(symbols: list[str], sleep: float = 0.0) -> pd.DataFrame:
+def _fetch_one_fundamental(sym: str) -> dict:
     import yfinance as yf
+    rec: dict = {"symbol": sym}
+    try:
+        t = yf.Ticker(sym + ".NS")
+        info = {}
+        try:
+            info = t.get_info() or {}
+        except Exception:
+            pass
+
+        bs = getattr(t, "balance_sheet", None)
+        isx = getattr(t, "income_stmt", None)
+        cf = getattr(t, "cashflow", None)
+
+        rec["yf_sector"] = info.get("sector") or "Unknown"
+        rec["yf_industry"] = info.get("industry") or "Unknown"
+        mcap = info.get("marketCap")
+        rec["market_cap_cr"] = mcap / 1e7 if mcap else None
+
+        rev = _pick(isx, IS_KEYS["revenue"])
+        ebit = _pick(isx, IS_KEYS["ebit"])
+        ebitda = _pick(isx, IS_KEYS["ebitda"])
+        ni = _pick(isx, IS_KEYS["net_income"])
+        eps = _pick(isx, IS_KEYS["diluted_eps"])
+        interest = _pick(isx, IS_KEYS["interest"])
+        assets = _pick(bs, BS_KEYS["total_assets"])
+        cl = _pick(bs, BS_KEYS["current_liab"])
+        eq = _pick(bs, BS_KEYS["total_equity"])
+        debt = _pick(bs, BS_KEYS["total_debt"])
+        cash = _pick(bs, BS_KEYS["cash"])
+        shares = _pick(bs, BS_KEYS["shares"])
+        cfo = _pick(cf, CF_KEYS["cfo"])
+        capex = _pick(cf, CF_KEYS["capex"])
+
+        rev0, ebit0, ebitda0, ni0 = _at(rev), _at(ebit), _at(ebitda), _at(ni)
+        eq0, debt0, cash0 = _at(eq), _at(debt) or 0.0, _at(cash) or 0.0
+        cfo0, capex0 = _at(cfo), _at(capex) or 0.0
+
+        if ebitda0 is None and ebit0 is not None:
+            ebitda0 = ebit0  # crude fallback; understates margin
+
+        rec["revenue"] = rev0
+        rec["ebitda"] = ebitda0
+        rec["net_income"] = ni0
+        rec["total_equity"] = eq0
+
+        # growth
+        rec["rev_growth_yoy"] = _growth(rev) or info.get("revenueGrowth")
+        rec["rev_cagr_3y"] = _cagr(rev, 3)
+        rec["eps_growth_yoy"] = _growth(eps) or info.get("earningsGrowth")
+        rec["eps_cagr_3y"] = _cagr(eps, 3)
+        # "EPS acceleration" from the factor sheet: is the latest year's growth
+        # outrunning the stock's own 3-year trend, or decelerating? A cleaner
+        # QoQ version would need quarterly statements, which are even more
+        # exposed to the same Yahoo crumb-blocking issue - this annual proxy
+        # is a reasonable middle ground.
+        rec["eps_acceleration"] = (
+            rec["eps_growth_yoy"] - rec["eps_cagr_3y"]
+            if rec["eps_growth_yoy"] is not None and rec["eps_cagr_3y"] is not None
+            else None
+        )
+        rec["ebitda_growth_yoy"] = _growth(ebitda)
+
+        # quality
+        capital_employed = None
+        if _at(assets) is not None and _at(cl) is not None:
+            capital_employed = _at(assets) - _at(cl)
+        rec["roce"] = (ebit0 / capital_employed) if (ebit0 and capital_employed and capital_employed > 0) else None
+        rec["roe"] = info.get("returnOnEquity") or ((ni0 / eq0) if (ni0 and eq0 and eq0 > 0) else None)
+        rec["ebitda_margin"] = (ebitda0 / rev0) if (ebitda0 is not None and rev0) else None
+        m3 = None
+        if ebitda is not None and rev is not None and len(ebitda) > 3 and len(rev) > 3:
+            old_m = _at(ebitda, 3) / _at(rev, 3) if _at(rev, 3) else None
+            if old_m is not None and rec["ebitda_margin"] is not None:
+                m3 = rec["ebitda_margin"] - old_m
+        rec["margin_delta_3y"] = m3
+
+        net_debt = debt0 - cash0
+        rec["net_debt_to_ebitda"] = (net_debt / ebitda0) if (ebitda0 and ebitda0 > 0) else None
+        rec["debt_to_equity"] = info.get("debtToEquity") or (
+            (debt0 / eq0 * 100) if (eq0 and eq0 > 0) else None)
+        int0 = abs(_at(interest) or 0.0)
+        rec["interest_coverage"] = (ebit0 / int0) if (ebit0 is not None and int0 > 0) else (
+            99.0 if ebit0 and ebit0 > 0 else None)
+
+        fcf = (cfo0 + capex0) if cfo0 is not None else info.get("freeCashflow")
+        rec["fcf"] = fcf
+        rec["fcf_to_pat"] = (fcf / ni0) if (fcf is not None and ni0 and ni0 > 0) else None
+        rec["fcf_margin"] = (fcf / rev0) if (fcf is not None and rev0) else None
+
+        # value
+        pe = info.get("trailingPE")
+        rec["pe"] = pe
+        rec["peg"] = info.get("pegRatio") or info.get("trailingPegRatio")
+        if rec["peg"] is None and pe and rec.get("eps_cagr_3y"):
+            g = rec["eps_cagr_3y"] * 100
+            rec["peg"] = pe / g if g > 0 else None
+        ev = info.get("enterpriseValue")
+        rec["ev_to_ebitda"] = (ev / ebitda0) if (ev and ebitda0 and ebitda0 > 0) else None
+        rec["earnings_yield"] = (1 / pe) if (pe and pe > 0) else None
+        rec["fcf_yield"] = (fcf / mcap) if (fcf is not None and mcap) else None
+        # own-history valuation: current P/E vs 5y median P/E from annual EPS
+        rec["pe_vs_own_5y"] = None
+        if pe and eps is not None and len(eps) >= 3:
+            hist_pe = []
+            price_now = info.get("currentPrice") or info.get("regularMarketPrice")
+            if price_now:
+                for j in range(min(5, len(eps))):
+                    e = _at(eps, j)
+                    if e and e > 0:
+                        hist_pe.append(price_now / e)
+            if len(hist_pe) >= 3:
+                med = float(np.median(hist_pe))
+                rec["pe_vs_own_5y"] = pe / med if med > 0 else None
+
+        # risk
+        rec["share_dilution_1y"] = _growth(shares)
+        rec["promoter_pledge_pct"] = None  # populated from overrides file
+
+    except Exception as e:
+        rec["error"] = str(e)[:120]
+    return rec
+
+
+def fundamentals_available(probe_symbol: str = "RELIANCE") -> bool:
+    """Quick check for whether Yahoo's fundamentals (quoteSummary/crumb-gated)
+    endpoints are reachable from this server, as opposed to the plain price
+    history endpoint which is unauthenticated and usually still works.
+
+    Yahoo has increasingly blocked the crumb-gated endpoints from datacenter
+    IPs (Render, AWS, etc.) even when price downloads succeed. Fetching 250
+    stocks sequentially only to discover this 250 times over wastes many
+    minutes for nothing - so we check once, up front, with a single symbol.
+    """
+    rec = _fetch_one_fundamental(probe_symbol)
+    # A working call returns a real market cap; a blocked one returns almost
+    # nothing but "symbol" and possibly "error".
+    return rec.get("market_cap_cr") is not None or rec.get("revenue") is not None
+
+
+def fetch_fundamentals(symbols: list[str], sleep: float = 0.0,
+                       max_workers: int = 10, log=print) -> pd.DataFrame:
+    """Fetch fundamentals in parallel (network-bound, so threads help a lot),
+    with per-symbol failures isolated - one blocked/slow ticker never blocks
+    the rest.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     rows = []
     total = len(symbols)
-    for i, sym in enumerate(symbols, 1):
-        if i % 25 == 0 or i == total:
-            print(f"  fundamentals {i}/{total}")
-        rec: dict = {"symbol": sym}
-        try:
-            t = yf.Ticker(sym + ".NS")
-            info = {}
-            try:
-                info = t.get_info() or {}
-            except Exception:
-                pass
-
-            bs = getattr(t, "balance_sheet", None)
-            isx = getattr(t, "income_stmt", None)
-            cf = getattr(t, "cashflow", None)
-
-            rec["yf_sector"] = info.get("sector") or "Unknown"
-            rec["yf_industry"] = info.get("industry") or "Unknown"
-            mcap = info.get("marketCap")
-            rec["market_cap_cr"] = mcap / 1e7 if mcap else None
-
-            rev = _pick(isx, IS_KEYS["revenue"])
-            ebit = _pick(isx, IS_KEYS["ebit"])
-            ebitda = _pick(isx, IS_KEYS["ebitda"])
-            ni = _pick(isx, IS_KEYS["net_income"])
-            eps = _pick(isx, IS_KEYS["diluted_eps"])
-            interest = _pick(isx, IS_KEYS["interest"])
-            assets = _pick(bs, BS_KEYS["total_assets"])
-            cl = _pick(bs, BS_KEYS["current_liab"])
-            eq = _pick(bs, BS_KEYS["total_equity"])
-            debt = _pick(bs, BS_KEYS["total_debt"])
-            cash = _pick(bs, BS_KEYS["cash"])
-            shares = _pick(bs, BS_KEYS["shares"])
-            cfo = _pick(cf, CF_KEYS["cfo"])
-            capex = _pick(cf, CF_KEYS["capex"])
-
-            rev0, ebit0, ebitda0, ni0 = _at(rev), _at(ebit), _at(ebitda), _at(ni)
-            eq0, debt0, cash0 = _at(eq), _at(debt) or 0.0, _at(cash) or 0.0
-            cfo0, capex0 = _at(cfo), _at(capex) or 0.0
-
-            if ebitda0 is None and ebit0 is not None:
-                ebitda0 = ebit0  # crude fallback; understates margin
-
-            rec["revenue"] = rev0
-            rec["ebitda"] = ebitda0
-            rec["net_income"] = ni0
-            rec["total_equity"] = eq0
-
-            # growth
-            rec["rev_growth_yoy"] = _growth(rev) or info.get("revenueGrowth")
-            rec["rev_cagr_3y"] = _cagr(rev, 3)
-            rec["eps_growth_yoy"] = _growth(eps) or info.get("earningsGrowth")
-            rec["eps_cagr_3y"] = _cagr(eps, 3)
-            rec["ebitda_growth_yoy"] = _growth(ebitda)
-
-            # quality
-            capital_employed = None
-            if _at(assets) is not None and _at(cl) is not None:
-                capital_employed = _at(assets) - _at(cl)
-            rec["roce"] = (ebit0 / capital_employed) if (ebit0 and capital_employed and capital_employed > 0) else None
-            rec["roe"] = info.get("returnOnEquity") or ((ni0 / eq0) if (ni0 and eq0 and eq0 > 0) else None)
-            rec["ebitda_margin"] = (ebitda0 / rev0) if (ebitda0 is not None and rev0) else None
-            m3 = None
-            if ebitda is not None and rev is not None and len(ebitda) > 3 and len(rev) > 3:
-                old_m = _at(ebitda, 3) / _at(rev, 3) if _at(rev, 3) else None
-                if old_m is not None and rec["ebitda_margin"] is not None:
-                    m3 = rec["ebitda_margin"] - old_m
-            rec["margin_delta_3y"] = m3
-
-            net_debt = debt0 - cash0
-            rec["net_debt_to_ebitda"] = (net_debt / ebitda0) if (ebitda0 and ebitda0 > 0) else None
-            rec["debt_to_equity"] = info.get("debtToEquity") or (
-                (debt0 / eq0 * 100) if (eq0 and eq0 > 0) else None)
-            int0 = abs(_at(interest) or 0.0)
-            rec["interest_coverage"] = (ebit0 / int0) if (ebit0 is not None and int0 > 0) else (
-                99.0 if ebit0 and ebit0 > 0 else None)
-
-            fcf = (cfo0 + capex0) if cfo0 is not None else info.get("freeCashflow")
-            rec["fcf"] = fcf
-            rec["fcf_to_pat"] = (fcf / ni0) if (fcf is not None and ni0 and ni0 > 0) else None
-            rec["fcf_margin"] = (fcf / rev0) if (fcf is not None and rev0) else None
-
-            # value
-            pe = info.get("trailingPE")
-            rec["pe"] = pe
-            rec["peg"] = info.get("pegRatio") or info.get("trailingPegRatio")
-            if rec["peg"] is None and pe and rec.get("eps_cagr_3y"):
-                g = rec["eps_cagr_3y"] * 100
-                rec["peg"] = pe / g if g > 0 else None
-            ev = info.get("enterpriseValue")
-            rec["ev_to_ebitda"] = (ev / ebitda0) if (ev and ebitda0 and ebitda0 > 0) else None
-            rec["earnings_yield"] = (1 / pe) if (pe and pe > 0) else None
-            rec["fcf_yield"] = (fcf / mcap) if (fcf is not None and mcap) else None
-            # own-history valuation: current P/E vs 5y median P/E from annual EPS
-            rec["pe_vs_own_5y"] = None
-            if pe and eps is not None and len(eps) >= 3:
-                hist_pe = []
-                price_now = info.get("currentPrice") or info.get("regularMarketPrice")
-                if price_now:
-                    for j in range(min(5, len(eps))):
-                        e = _at(eps, j)
-                        if e and e > 0:
-                            hist_pe.append(price_now / e)
-                if len(hist_pe) >= 3:
-                    med = float(np.median(hist_pe))
-                    rec["pe_vs_own_5y"] = pe / med if med > 0 else None
-
-            # risk
-            rec["share_dilution_1y"] = _growth(shares)
-            rec["promoter_pledge_pct"] = None  # populated from overrides file
-
-        except Exception as e:
-            rec["error"] = str(e)[:120]
-        rows.append(rec)
-        if sleep:
-            time.sleep(sleep)
+    done = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(_fetch_one_fundamental, sym): sym for sym in symbols}
+        for fut in as_completed(futures):
+            rows.append(fut.result())
+            done += 1
+            if done % 25 == 0 or done == total:
+                log(f"fundamentals {done}/{total}")
+            if sleep:
+                time.sleep(sleep)
     return pd.DataFrame(rows).set_index("symbol")
 
 
@@ -534,6 +608,12 @@ def apply_eligibility(df: pd.DataFrame, rules: Eligibility) -> pd.DataFrame:
     if rules.require_positive_ebitda:
         ok("ebitda", lambda v: v > 0, "ebitda")
 
+    if rules.skip_leverage_checks_for_sectors and "sector" in df.columns:
+        exempt = df["sector"].isin(rules.skip_leverage_checks_for_sectors)
+        for col in ("fail_leverage", "fail_intcov"):
+            if col in df.columns:
+                df.loc[exempt, col] = False
+
     fail_cols = [c for c in df.columns if c.startswith("fail_")]
     df["n_fails"] = df[fail_cols].sum(axis=1)
     df["eligible"] = df["n_fails"] == 0
@@ -578,6 +658,7 @@ def run_screen(
     px = fetch_prices(symbols)
     pf = price_factors(px, symbols)
 
+    data_mode = "fast" if fast else "full"
     if fast:
         fund = pd.DataFrame(index=pf.index)
     else:
@@ -588,12 +669,21 @@ def run_screen(
             log("Loading cached fundamentals")
             fund = pd.read_parquet(cache)
         else:
-            log(f"Downloading fundamentals for {len(symbols)} names (this is the slow step) ...")
-            fund = fetch_fundamentals(symbols)
-            try:
-                fund.to_parquet(cache)
-            except Exception:
-                fund.to_csv(cache.replace(".parquet", ".csv"))
+            log("Checking whether Yahoo fundamentals are reachable from this server ...")
+            if not fundamentals_available():
+                log("Fundamentals endpoint is blocked from this server (common on cloud "
+                    "hosts) - falling back to momentum-only scoring instead of spending "
+                    "several minutes failing on every one of "
+                    f"{len(symbols)} names.")
+                fund = pd.DataFrame(index=pf.index)
+                data_mode = "momentum_only_fallback"
+            else:
+                log(f"Downloading fundamentals for {len(symbols)} names (parallel) ...")
+                fund = fetch_fundamentals(symbols, log=log)
+                try:
+                    fund.to_parquet(cache)
+                except Exception:
+                    fund.to_csv(cache.replace(".parquet", ".csv"))
 
     df = pf.join(fund, how="left")
     df = df.join(uni.set_index("symbol")[["name", "nse_sector"]], how="left")
@@ -637,12 +727,35 @@ def run_screen(
             rec[c] = None if pd.isna(v) else (float(v) if isinstance(v, (int, float, np.floating)) else v)
         records.append(rec)
 
+    # Full-universe lookup for debugging/transparency: every symbol scanned,
+    # whether it made eligibility, why not if it didn't, and its full score
+    # breakdown if it did - regardless of whether it made the final top N.
+    # This is what answers "why isn't <stock> in the list" without guessing.
+    score_cols = [c for c in elig.columns if c.startswith("score_") or c == "SCORE"
+                 or c == "data_coverage"]
+    df = df.join(elig[score_cols], how="left", rsuffix="_elig")
+    lookup = {}
+    for sym, row in df.iterrows():
+        entry = {
+            "name": None if pd.isna(row.get("name")) else row.get("name"),
+            "sector": None if pd.isna(row.get("sector")) else row.get("sector"),
+            "eligible": bool(row.get("eligible", False)),
+            "fail_reasons": row.get("fail_reasons", "") or None,
+        }
+        for c in score_cols:
+            v = row.get(c)
+            entry[c] = None if pd.isna(v) else float(v)
+        entry["made_top_n"] = sym in set(picks.index)
+        lookup[sym] = entry
+
     return {
         "generated_at": stamp,
         "universe": universe,
         "universe_size": len(symbols),
+        "data_mode": data_mode,
         "eligible_count": int(len(elig)),
         "weights": weights,
         "picks": records,
+        "lookup": lookup,
     }
 
