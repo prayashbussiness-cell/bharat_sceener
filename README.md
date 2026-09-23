@@ -164,3 +164,118 @@ that, which is the wrong trade-off for something informing real money
 decisions. Gemini's role stays explanatory: it now also flags in its
 commentary when a pick's `data_coverage` is low or a sub-score is missing,
 so a thin-data pick doesn't read as a fully-informed one.
+
+## Strategy revision: two screeners, reweighted toward momentum
+
+After comparing our output against publicly disclosed Bharat Market
+Outperformers holdings (PSU banks, NBFCs, defense - large-cap, momentum-
+heavy names), two things changed:
+
+**Two independent screeners instead of one**, each with its own button,
+own cached result, own lookup scope:
+- **Primary (Nifty 100)** - large-cap only. Matches a leaked config summary
+  describing the real strategy as "Large-Cap, Low risk, Max 20 holdings."
+  This is the closer match to what the real product actually holds.
+- **Broad (Nifty 250)** - the original wider sweep, kept as a second,
+  higher-risk/higher-reach option. Running one never overwrites the other's
+  results - they're cached separately (`data/last_result_primary.json` /
+  `data/last_result_broad.json`) and both stay viewable on the page at once.
+
+**Bucket weights rebalanced** from 20/25/20/25/10 to
+**Growth 20 / Quality 20 / Value 15 / Momentum 35 / Risk 10**. The real
+disclosed portfolio (Union Bank of India, Bank of Maharashtra, L&T Finance,
+HAL, PNB) reads as momentum/re-rating-driven more than classic cheap-quality
+compounding - a screener.in screen sorted primarily by 1-year return and
+built on a large-cap universe empirically overlapped with real disclosed
+holdings (Union Bank of India and Bank of Maharashtra both appeared in it),
+while a separate small-cap "quality+growth" screen sharing the "bharat" name
+shared no holdings with the real portfolio at all. That's the evidence behind
+the reweight - not a hunch.
+
+**Top N raised from 15 to 20**, matching the disclosed max-holdings figure.
+
+**Caveat, stated plainly:** this reweighting is still evidence-based
+inference from public marketing pages and a handful of disclosed names, not
+the actual InvestingPro model weights, which remain undisclosed. Treat the
+new weights as a better-informed starting point, not a confirmed replica -
+the backtesting caveats in the original README still apply in full.
+
+### New API shape (mode-based)
+
+- `POST /api/run?mode=primary|broad|quick`
+- `GET /api/results?mode=primary|broad|quick` (default `broad`)
+- `GET /api/lookup/{symbol}?mode=primary|broad|quick` (default `broad`)
+- `GET /api/status` now also returns `mode`, showing which screener (if any)
+  is currently running - only one scan runs system-wide at a time regardless
+  of mode, to stay within Render free-tier CPU limits.
+
+New env vars: `SCREEN_UNIVERSE_PRIMARY` (default `nifty100`) and
+`SCREEN_UNIVERSE_BROAD` (default `nifty250`), replacing the old single
+`SCREEN_UNIVERSE`.
+
+## New Flow 0.1 - a separate, deeper screener
+
+A completely independent third screener, built from a supplied spec (100-
+factor engine, hard filters, red-flag penalties, Key Strengths/Risks
+output). It has its own button, its own factor set, its own hard filters,
+and its own cache file - it never shares scoring code with the Bharat
+Screener (primary/broad/quick), so changes to one can never silently affect
+the other. It reuses only the market-data plumbing (NSE download + fallback,
+Yahoo price/fundamentals fetch) from `engine_core.py`.
+
+### What's real vs. what's a documented no-op
+
+The supplied spec assumes some data this free pipeline doesn't have access
+to. Rather than fake those with a shaky proxy, they're implemented as
+explicit no-ops - visible in the API response (`hard_filters_not_enforced`)
+and in the UI's "Hard filters & red-flag penalties" panel:
+
+- **Hard filters (8 of 10 enforced):** market cap, daily turnover, listing
+  history, promoter pledge (only when you supply `pledge_overrides.csv` -
+  otherwise inert), extreme debt/equity (500% cutoff, with the same
+  Financial-Services exemption as the original screener), extreme 1-year
+  dilution, and negative equity are all real, computed checks.
+  `accounting_red_flag` and `extreme_circuit_frequency` are **not
+  enforced** - they need auditor-opinion data and NSE surveillance/circuit
+  history that no free source reliably provides.
+- **Red flags (6 of 7 fire for real):** promoter pledge, major dilution,
+  multi-year negative FCF, debt explosion (year-over-year, exempting
+  banks), earnings/cashflow divergence (via the accrual ratio), and extreme
+  valuation all compute from real fetched data. `major_auditor_issue`
+  (-15 pts) **never fires** - same reason as above, and it's tested to
+  confirm it stays inert rather than silently triggering on bad data.
+- **Approximated, not exact:** ROIC uses a flat 25% assumed Indian
+  corporate tax rate (no reliable effective-tax-rate field from Yahoo's
+  free statements), and `profit_cagr_5y` often computes over 3-4 years in
+  practice since Yahoo's free annual statements rarely go back a full 5.
+  `cash_conversion_cycle` is left `None` always - receivables/inventory/
+  payables aren't reliably available, and a rough approximation there would
+  be more misleading than an honest gap.
+
+### Scoring
+
+7 buckets: **Growth 20% / Quality 20% / Earnings Quality 15% / Momentum
+20% / Value 10% / Risk 10% / Ownership 5%**. Each factor is the same
+sector-neutral winsorized z-score as the original screener (shared code,
+`engine_core.score()`, now parametrized by factor list). The 0-100 SCORE is
+a percentile rank of the composite z, then red-flag penalty points are
+subtracted and the result is clipped back to [0, 100].
+
+**Status label**, deterministic from the score and quality/momentum
+sub-scores: `HIGH-QUALITY MOMENTUM` (score ≥80, strong quality AND
+momentum) → `OUTPERFORMER` (≥75) → `WATCHLIST` (≥55) → `BELOW THRESHOLD`.
+
+**Key Strengths / Key Risks** are generated deterministically from the
+actual per-factor z-scores and triggered red flags - not by an LLM. This
+was a deliberate choice, consistent with the rest of this project: the
+screening logic stays auditable and reproducible end-to-end, so New Flow
+doesn't call Gemini at all.
+
+### API
+
+`POST /api/run?mode=newflow`, `GET /api/results?mode=newflow`,
+`GET /api/lookup/{symbol}?mode=newflow` - same shape as the other modes.
+`GET /api/config` includes a `newflow` block with its hard filters,
+weights, and red-flag penalty table.
+
+New env var: `SCREEN_UNIVERSE_NEWFLOW` (default `nifty250`).

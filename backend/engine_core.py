@@ -38,6 +38,7 @@ BENCHMARK_FALLBACK = "^NSEI"    # Nifty 50
 
 # NSE publishes constituent CSVs at these stable URLs.
 UNIVERSE_URLS = {
+    "nifty100": "https://nsearchives.nseindia.com/content/indices/ind_nifty100list.csv",
     "nifty250": "https://nsearchives.nseindia.com/content/indices/ind_niftylargemidcap250list.csv",
     "nifty500": "https://nsearchives.nseindia.com/content/indices/ind_nifty500list.csv",
     "nifty200": "https://nsearchives.nseindia.com/content/indices/ind_nifty200list.csv",
@@ -131,10 +132,13 @@ FACTORS = [
 ]
 
 BUCKET_WEIGHTS = {
+    # Rebalanced from the original 20/25/20/25/10 after comparing our output
+    # against real disclosed Bharat Market Outperformers holdings (large-cap,
+    # PSU-bank and NBFC heavy, strongly momentum-tilted) - see README changelog.
     "growth": 0.20,
-    "quality": 0.25,
-    "value": 0.20,
-    "momentum": 0.25,
+    "quality": 0.20,
+    "value": 0.15,
+    "momentum": 0.35,
     "risk": 0.10,
 }
 
@@ -179,12 +183,17 @@ def load_universe(name: str, custom_csv: str | None = None) -> pd.DataFrame:
             time.sleep(2)
 
     # Live NSE fetch failed on all attempts (common from cloud-hosted IPs, which
-    # NSE frequently blocks). Fall back to the bundled snapshot rather than
-    # failing the whole scan - it's a smaller, manually-curated list and will
-    # drift out of date, but keeps the app usable. Update
-    # app/nifty250_fallback.csv periodically to refresh it.
-    fallback_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                 "nifty250_fallback.csv")
+    # NSE frequently blocks). Fall back to a bundled snapshot rather than
+    # failing the whole scan - these are smaller, manually-curated lists and
+    # will drift out of date, but keep the app usable. Update the CSVs
+    # periodically to refresh them. nifty100 gets its own (large-cap-only)
+    # snapshot since the 250-list fallback would pull in mid-caps that
+    # wouldn't actually be in a real Nifty 100.
+    fallback_files = {
+        "nifty100": "nifty100_fallback.csv",
+    }
+    fallback_name = fallback_files.get(name, "nifty250_fallback.csv")
+    fallback_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), fallback_name)
     if os.path.exists(fallback_path):
         print(f"WARNING: live NSE fetch failed ({last_err}); using bundled fallback list "
               f"({fallback_path}). This list is a manually curated snapshot, not the live "
@@ -362,6 +371,67 @@ def _growth(s: pd.Series | None) -> float | None:
     return new / abs(old) - 1
 
 
+def _consistency(s: pd.Series | None) -> float | None:
+    """Fraction of available year-over-year periods with positive growth.
+    s is newest-first (yfinance convention). Needs >=3 periods (2 YoY
+    comparisons) to mean anything; returns None below that.
+    """
+    if s is None or len(s) < 3:
+        return None
+    positives = 0
+    total = 0
+    for i in range(len(s) - 1):
+        new, old = _at(s, i), _at(s, i + 1)
+        if new is None or old is None or old == 0:
+            continue
+        total += 1
+        if new > old:
+            positives += 1
+    return (positives / total) if total > 0 else None
+
+
+def _fcf_cagr(cfo: pd.Series | None, capex: pd.Series | None, years: int = 3) -> float | None:
+    """CAGR of (CFO + capex) per year over up to `years` periods. Needs both
+    series to cover the same number of periods; Yahoo's free annual
+    statements typically only go back ~4 years, so this is best-effort and
+    often computes over fewer than `years` periods (or returns None).
+    """
+    if cfo is None or capex is None:
+        return None
+    n = min(len(cfo), len(capex), years + 1)
+    if n < 2:
+        return None
+    fcf_vals = []
+    for i in range(n):
+        c, x = _at(cfo, i), _at(capex, i)
+        if c is None:
+            return None
+        fcf_vals.append(c + (x or 0.0))
+    newest, oldest = fcf_vals[0], fcf_vals[-1]
+    if oldest is None or oldest <= 0 or newest is None or newest <= 0:
+        return None
+    periods = n - 1
+    return (newest / oldest) ** (1 / periods) - 1
+
+
+def _count_negative_fcf(cfo: pd.Series | None, capex: pd.Series | None, years: int = 3) -> int | None:
+    """How many of the last `years` annual periods had FCF (CFO + capex) < 0.
+    Feeds the fcf_negative_multiple_years red flag."""
+    if cfo is None or capex is None:
+        return None
+    n = min(len(cfo), len(capex), years)
+    if n < 1:
+        return None
+    count = 0
+    for i in range(n):
+        c, x = _at(cfo, i), _at(capex, i)
+        if c is None:
+            continue
+        if (c + (x or 0.0)) < 0:
+            count += 1
+    return count
+
+
 def _fetch_one_fundamental(sym: str) -> dict:
     import yfinance as yf
     rec: dict = {"symbol": sym}
@@ -452,6 +522,70 @@ def _fetch_one_fundamental(sym: str) -> dict:
         rec["fcf"] = fcf
         rec["fcf_to_pat"] = (fcf / ni0) if (fcf is not None and ni0 and ni0 > 0) else None
         rec["fcf_margin"] = (fcf / rev0) if (fcf is not None and rev0) else None
+
+        # ---- New Flow 0.1 factors (all reuse the series already fetched
+        # above - no extra API calls). See newflow_engine.py for which of
+        # these have a genuine free data source and which are best-effort
+        # approximations, documented there rather than silently assumed. ----
+        rec["revenue_growth_consistency"] = _consistency(rev)
+        rec["eps_growth_consistency"] = _consistency(eps)
+        rec["profit_cagr_5y"] = _cagr(ni, min(4, len(ni) - 1)) if ni is not None and len(ni) > 1 else None
+
+        # ROIC: NOPAT / invested capital. No effective-tax-rate field is
+        # reliably available from Yahoo's free statements, so this uses a
+        # flat 25% assumed Indian corporate tax rate - an approximation,
+        # not a company-specific effective rate.
+        invested_capital = (debt0 + eq0 - cash0) if eq0 is not None else None
+        rec["roic"] = (ebit0 * 0.75 / invested_capital) if (
+            ebit0 is not None and invested_capital and invested_capital > 0) else None
+
+        # Incremental ROCE: change in EBIT / change in capital employed,
+        # year over year - is the capital being added actually productive.
+        capital_employed_1 = None
+        if assets is not None and cl is not None and len(assets) > 1 and len(cl) > 1:
+            a1, c1 = _at(assets, 1), _at(cl, 1)
+            if a1 is not None and c1 is not None:
+                capital_employed_1 = a1 - c1
+        rec["incremental_roce"] = None
+        if (capital_employed is not None and capital_employed_1 is not None
+                and ebit is not None and len(ebit) > 1):
+            d_capital = capital_employed - capital_employed_1
+            d_ebit = ebit0 - (_at(ebit, 1) or 0)
+            if abs(d_capital) > 1:  # avoid divide-by-near-zero noise
+                rec["incremental_roce"] = d_ebit / d_capital
+
+        rec["asset_turnover"] = (rev0 / _at(assets)) if (rev0 and _at(assets)) else None
+
+        # Cash conversion cycle needs receivable/inventory/payable days,
+        # which Yahoo's free statements don't reliably expose for Indian
+        # filings - left None rather than built on a shaky approximation.
+        rec["cash_conversion_cycle"] = None
+
+        # earnings quality
+        rec["cfo_to_pat"] = (cfo0 / ni0) if (cfo0 is not None and ni0 and ni0 > 0) else None
+        rec["fcf_growth_3y"] = _fcf_cagr(cfo, capex, years=3)
+        # Accrual ratio: (net income - CFO) / total assets. Lower/negative is
+        # healthier - earnings backed by real cash, not accounting accruals.
+        rec["accrual_ratio"] = (
+            (ni0 - cfo0) / _at(assets)
+            if (ni0 is not None and cfo0 is not None and _at(assets)) else None
+        )
+
+        # value additions
+        rec["price_to_book"] = (mcap / eq0) if (mcap and eq0 and eq0 > 0) else None
+        rec["price_to_sales"] = (mcap / rev0) if (mcap and rev0) else None
+        rec["dividend_yield"] = info.get("dividendYield")
+
+        # risk additions
+        rec["net_debt_to_fcf"] = (net_debt / fcf) if (fcf and fcf > 0) else None
+        rec["fcf_to_debt"] = (fcf / debt0) if (fcf is not None and debt0 and debt0 > 0) else None
+
+        # raw fields feeding New Flow's red-flag checks (not scoring factors
+        # themselves - see newflow_engine.RED_FLAG_PENALTIES)
+        rec["fcf_negative_years_recent"] = _count_negative_fcf(cfo, capex, years=3)
+        debt1, eq1 = (_at(debt, 1) or 0.0) if debt is not None and len(debt) > 1 else None, \
+                     _at(eq, 1) if eq is not None and len(eq) > 1 else None
+        rec["debt_to_equity_prior"] = (debt1 / eq1 * 100) if (debt1 is not None and eq1 and eq1 > 0) else None
 
         # value
         pe = info.get("trailingPE")
@@ -553,11 +687,12 @@ def sector_neutral_z(df: pd.DataFrame, col: str, sector_col: str,
 
 
 def score(df: pd.DataFrame, sector_col: str = "sector",
-          weights: dict | None = None) -> pd.DataFrame:
+          weights: dict | None = None, factors: list | None = None) -> pd.DataFrame:
     weights = weights or BUCKET_WEIGHTS
+    factors = factors if factors is not None else FACTORS
     zcols: dict[str, list[str]] = {b: [] for b in weights}
 
-    for col, higher, bucket in FACTORS:
+    for col, higher, bucket in factors:
         if col not in df.columns:
             continue
         if df[col].notna().sum() < 5:

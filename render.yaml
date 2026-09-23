@@ -13,10 +13,12 @@ services:
         value: gemini-2.5-flash
       - key: ENABLE_GEMINI
         value: "true"
-      - key: SCREEN_UNIVERSE
+      - key: SCREEN_UNIVERSE_PRIMARY
+        value: nifty100
+      - key: SCREEN_UNIVERSE_BROAD
         value: nifty250
       - key: SCREEN_TOP_N
-        value: "15"
+        value: "20"
       - key: SCREEN_MAX_PER_SECTOR
         value: "4"
       - key: SCREEN_FAST_MODE

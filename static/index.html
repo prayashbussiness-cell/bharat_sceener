@@ -31,244 +31,118 @@
   }
   ::selection{background:var(--marigold);color:var(--ink);}
 
-  .wrap{max-width:920px;margin:0 auto;padding:0 24px;}
+  .wrap{max-width:960px;margin:0 auto;padding:0 24px;}
 
-  header{
-    padding:64px 0 40px;
+  header.masthead{
+    padding:56px 0 32px;
     border-bottom:1px solid var(--hair);
   }
-  .kicker{
-    font-size:13px;
-    color:var(--marigold);
-    letter-spacing:.02em;
-    margin:0 0 14px;
-  }
+  .kicker{font-size:13px;color:var(--marigold);letter-spacing:.02em;margin:0 0 14px;}
   h1{
     font-family:'Fraunces',serif;
     font-optical-sizing:auto;
     font-weight:500;
-    font-size:clamp(34px,5vw,54px);
+    font-size:clamp(30px,4.6vw,48px);
     line-height:1.05;
-    margin:0 0 18px;
-    max-width:14ch;
+    margin:0 0 16px;
+    max-width:16ch;
   }
-  .lede{
-    color:var(--paper-dim);
-    font-size:16px;
-    max-width:56ch;
-    margin:0 0 28px;
-  }
-  .lede a{color:var(--paper);}
+  .lede{color:var(--paper-dim);font-size:15.5px;max-width:62ch;margin:0;}
 
-  .controls{
-    display:flex;
-    align-items:center;
-    gap:18px;
-    flex-wrap:wrap;
+  details.rules{margin-top:22px;font-size:13.5px;color:var(--paper-dim);}
+  details.rules summary{cursor:pointer;color:var(--paper);font-weight:500;padding:4px 0;}
+  .rules-body{padding:12px 0 4px;}
+  .rules-body table{border-collapse:collapse;width:100%;max-width:520px;}
+  .rules-body td{padding:5px 10px 5px 0;border-bottom:1px solid var(--hair);
+    font-family:'IBM Plex Mono',monospace;font-size:12.5px;}
+  .rules-body td:first-child{color:var(--paper-dim);font-family:'Work Sans',sans-serif;}
+  .rules-body .exempt-note{margin-top:10px;font-size:12.5px;color:var(--marigold-dim);}
+  .rules-body .weights-note{margin-top:10px;font-size:12.5px;}
+
+  .lookup{margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+  .lookup input{
+    background:var(--ink-raised);border:1px solid var(--hair);color:var(--paper);
+    font-family:'IBM Plex Mono',monospace;font-size:13px;padding:9px 12px;
+    border-radius:var(--radius);width:230px;
   }
+  .lookup input:focus{outline:1px solid var(--marigold-dim);}
+  .lookup select{
+    background:var(--ink-raised);border:1px solid var(--hair);color:var(--paper);
+    font-family:'Work Sans',sans-serif;font-size:13px;padding:9px 10px;border-radius:var(--radius);
+  }
+  .lookup button{
+    background:transparent;border:1px solid var(--hair);color:var(--paper);
+    font-family:'Work Sans',sans-serif;font-size:13px;padding:9px 16px;
+    border-radius:var(--radius);cursor:pointer;
+  }
+  .lookup button:hover{background:var(--ink-raised);}
+  .lookup-result{margin-top:12px;font-size:13.5px;color:var(--paper-dim);max-width:62ch;}
+  .lookup-result .lr-eligible{color:var(--jade);}
+  .lookup-result .lr-ineligible{color:var(--rose);}
+  .lookup-result b{color:var(--paper);font-weight:500;}
+
+  /* --- screener panels -------------------------------------------------- */
+  .panel{padding:48px 0;border-bottom:1px solid var(--hair);}
+  .panel-head{display:flex;align-items:baseline;justify-content:space-between;
+    flex-wrap:wrap;gap:14px;margin-bottom:18px;}
+  .panel-title{font-family:'Fraunces',serif;font-weight:500;font-size:24px;}
+  .panel-tag{font-size:12px;color:var(--marigold-dim);border:1px solid var(--hair);
+    border-radius:var(--radius);padding:2px 8px;margin-left:10px;vertical-align:middle;}
+  .controls{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:10px;}
   button.run{
-    background:var(--marigold);
-    color:var(--ink);
-    border:none;
-    font-family:'Work Sans',sans-serif;
-    font-weight:600;
-    font-size:15px;
-    padding:13px 24px;
-    border-radius:var(--radius);
-    cursor:pointer;
+    background:var(--marigold);color:var(--ink);border:none;
+    font-family:'Work Sans',sans-serif;font-weight:600;font-size:14.5px;
+    padding:12px 22px;border-radius:var(--radius);cursor:pointer;
     transition:transform .12s ease, background .15s ease;
   }
   button.run:hover{background:#eeb654;}
   button.run:active{transform:scale(.98);}
   button.run:disabled{background:var(--ink-raised);color:var(--paper-dim);cursor:progress;}
-  button.run.quick{background:transparent;color:var(--paper);border:1px solid var(--hair);}
-  button.run.quick:hover{background:var(--ink-raised);}
-
-  .banner{
-    display:none;
-    margin-top:20px;
-    padding:12px 16px;
-    border:1px solid var(--marigold-dim);
-    border-radius:var(--radius);
-    font-size:13.5px;
-    color:var(--marigold);
-    background:rgba(227,167,58,0.08);
-  }
-  .banner.show{display:block;}
-
-  details.rules{
-    margin-top:22px;
-    font-size:13.5px;
-    color:var(--paper-dim);
-  }
-  details.rules summary{
-    cursor:pointer;
-    color:var(--paper);
-    font-weight:500;
-    padding:4px 0;
-  }
-  .rules-body{padding:12px 0 4px;}
-  .rules-body table{border-collapse:collapse;width:100%;max-width:520px;}
-  .rules-body td{
-    padding:5px 10px 5px 0;
-    border-bottom:1px solid var(--hair);
-    font-family:'IBM Plex Mono',monospace;
-    font-size:12.5px;
-  }
-  .rules-body td:first-child{color:var(--paper-dim);font-family:'Work Sans',sans-serif;}
-  .rules-body .exempt-note{
-    margin-top:10px;
-    font-size:12.5px;
-    color:var(--marigold-dim);
-  }
-
-  .lookup{
-    margin-top:18px;
-    display:flex;
-    gap:10px;
-  }
-  .lookup input{
-    background:var(--ink-raised);
-    border:1px solid var(--hair);
-    color:var(--paper);
-    font-family:'IBM Plex Mono',monospace;
-    font-size:13px;
-    padding:9px 12px;
-    border-radius:var(--radius);
-    width:260px;
-  }
-  .lookup input:focus{outline:1px solid var(--marigold-dim);}
-  .lookup button{
-    background:transparent;
-    border:1px solid var(--hair);
-    color:var(--paper);
-    font-family:'Work Sans',sans-serif;
-    font-size:13px;
-    padding:9px 16px;
-    border-radius:var(--radius);
-    cursor:pointer;
-  }
-  .lookup button:hover{background:var(--ink-raised);}
-  .lookup-result{
-    margin-top:12px;
-    font-size:13.5px;
-    color:var(--paper-dim);
-    max-width:60ch;
-  }
-  .lookup-result .lr-eligible{color:var(--jade);}
-  .lookup-result .lr-ineligible{color:var(--rose);}
-  .lookup-result b{color:var(--paper);font-weight:500;}
-
-  .status-line{
-    font-size:14px;
-    color:var(--paper-dim);
-    display:flex;
-    align-items:center;
-    gap:8px;
-  }
-  .dot{
-    width:7px;height:7px;border-radius:50%;
-    background:var(--paper-dim);
-    flex:none;
-  }
+  .status-line{font-size:13.5px;color:var(--paper-dim);display:flex;align-items:center;gap:8px;}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--paper-dim);flex:none;}
   .dot.running{background:var(--marigold);animation:pulse 1.1s ease-in-out infinite;}
   .dot.done{background:var(--jade);}
   .dot.error{background:var(--rose);}
   @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
-
-  .meta{
-    display:flex;gap:28px;flex-wrap:wrap;
-    padding:24px 0 0;
-    font-size:13px;
-    color:var(--paper-dim);
-  }
+  .meta{display:flex;gap:24px;flex-wrap:wrap;padding:6px 0 0;font-size:12.5px;color:var(--paper-dim);}
   .meta b{color:var(--paper);font-weight:500;}
 
-  section.overall{
-    padding:32px 0;
-    border-bottom:1px solid var(--hair);
-    font-size:15px;
-    color:var(--paper-dim);
-    display:none;
+  .banner{
+    display:none;margin-top:16px;padding:11px 15px;border:1px solid var(--marigold-dim);
+    border-radius:var(--radius);font-size:13px;color:var(--marigold);
+    background:rgba(227,167,58,0.08);
   }
+  .banner.show{display:block;}
+
+  section.overall{padding:20px 0 4px;font-size:14px;color:var(--paper-dim);display:none;}
   section.overall.show{display:block;}
   section.overall p{margin:0;max-width:70ch;}
 
-  .list{padding:8px 0 80px;}
-  .row{
-    display:grid;
-    grid-template-columns:40px 1fr auto;
-    gap:18px;
-    align-items:start;
-    padding:22px 0;
-    border-bottom:1px solid var(--hair);
-  }
-  .rank{
-    font-family:'IBM Plex Mono',monospace;
-    font-size:13px;
-    color:var(--marigold-dim);
-    padding-top:3px;
-  }
-  .name-block .sym{
-    font-family:'Fraunces',serif;
-    font-weight:500;
-    font-size:20px;
-  }
-  .name-block .co{
-    color:var(--paper-dim);
-    font-size:14px;
-    margin-top:2px;
-  }
-  .name-block .sector{
-    display:inline-block;
-    margin-top:8px;
-    font-size:12px;
-    color:var(--paper-dim);
-    border:1px solid var(--hair);
-    border-radius:var(--radius);
-    padding:2px 8px;
-  }
-  .rationale{
-    color:var(--paper-dim);
-    font-size:13.5px;
-    margin-top:10px;
-    max-width:58ch;
-  }
+  .list{padding:8px 0 0;}
+  .row{display:grid;grid-template-columns:36px 1fr auto;gap:16px;align-items:start;
+    padding:18px 0;border-bottom:1px solid var(--hair);}
+  .row:last-child{border-bottom:none;}
+  .rank{font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--marigold-dim);padding-top:3px;}
+  .name-block .sym{font-family:'Fraunces',serif;font-weight:500;font-size:18px;}
+  .name-block .co{color:var(--paper-dim);font-size:13px;margin-top:2px;}
+  .name-block .sector{display:inline-block;margin-top:7px;font-size:11.5px;color:var(--paper-dim);
+    border:1px solid var(--hair);border-radius:var(--radius);padding:2px 8px;}
+  .rationale{color:var(--paper-dim);font-size:13px;margin-top:9px;max-width:58ch;}
   .score-block{text-align:right;}
-  .score{
-    font-family:'IBM Plex Mono',monospace;
-    font-size:26px;
-    color:var(--marigold);
-  }
-  .score span{font-size:14px;color:var(--paper-dim);}
-  .subscores{
-    margin-top:8px;
-    font-family:'IBM Plex Mono',monospace;
-    font-size:11px;
-    color:var(--paper-dim);
-    line-height:1.7;
-    text-align:right;
-  }
+  .score{font-family:'IBM Plex Mono',monospace;font-size:23px;color:var(--marigold);}
+  .score span{font-size:13px;color:var(--paper-dim);}
+  .subscores{margin-top:7px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;
+    color:var(--paper-dim);line-height:1.7;text-align:right;}
   .subscores b{color:var(--paper);font-weight:400;}
   .coverage-low{color:var(--rose);}
 
-  .empty{
-    padding:60px 0;
-    color:var(--paper-dim);
-    font-size:15px;
-    max-width:50ch;
-  }
+  .empty{padding:36px 0;color:var(--paper-dim);font-size:14px;max-width:52ch;}
 
-  footer{
-    border-top:1px solid var(--hair);
-    padding:28px 0 56px;
-    font-size:12.5px;
-    color:var(--paper-dim);
-  }
-  footer p{max-width:70ch;margin:0 0 10px;}
+  footer{padding:28px 0 56px;font-size:12.5px;color:var(--paper-dim);}
+  footer p{max-width:72ch;margin:0 0 10px;}
 
   @media (max-width:600px){
-    .row{grid-template-columns:28px 1fr;}
+    .row{grid-template-columns:24px 1fr;}
     .score-block{grid-column:1/-1;text-align:left;padding-top:6px;}
     .subscores{text-align:left;}
   }
@@ -277,51 +151,40 @@
 <body>
 <div class="wrap">
 
-  <header>
+  <header class="masthead">
     <p class="kicker">Live multi-factor screen · NSE data via Yahoo Finance</p>
     <h1>Bharat Top Performing Stocks</h1>
     <p class="lede">
-      A sector-neutral scan of the Indian large &amp; mid-cap universe, ranked on
+      Two sector-neutral scans of the Indian equity market, ranked on
       growth, quality, valuation, momentum and risk. Runs on demand against
       live market data — nothing here is pre-written.
     </p>
-    <div class="controls">
-      <button class="run" id="runBtn">Run today's scan</button>
-      <button class="run quick" id="quickBtn">Quick scan (30 stocks, ~1 min)</button>
-      <div class="status-line"><span class="dot" id="statusDot"></span><span id="statusText">Not run yet</span></div>
-    </div>
-    <div class="meta" id="metaRow"></div>
 
     <details class="rules">
-      <summary>Screening rules used this run</summary>
+      <summary>Screening rules &amp; weights used</summary>
       <div id="rulesBody" class="rules-body">Loading…</div>
     </details>
 
     <div class="lookup">
       <input type="text" id="lookupInput" placeholder="Check a specific stock, e.g. ICICIBANK" autocomplete="off">
+      <select id="lookupMode">
+        <option value="primary">in Nifty 100 (primary) scan</option>
+        <option value="broad" selected>in Nifty 250 (broad) scan</option>
+        <option value="newflow">in New Flow 0.1 scan</option>
+      </select>
       <button id="lookupBtn">Check</button>
     </div>
     <div id="lookupResult" class="lookup-result"></div>
   </header>
 
-  <section class="banner" id="modeBanner"></section>
-
-  <section class="overall" id="overallSection">
-    <p id="overallText"></p>
-  </section>
-
-  <div class="list" id="list">
-    <div class="empty">No results yet. Click "Run today's scan" to fetch live
-      prices and fundamentals, apply the eligibility rules, and rank what's left.
-      A full scan typically takes a few minutes the first time.</div>
-  </div>
+  <div id="panels"></div>
 
   <footer>
     <p><b>How to read this.</b> Score is a 0–100 percentile of a composite
       z-score built from sector-relative factors, not a prediction. Sub-scores
       shown are Growth / Quality / Value / Momentum / Risk. Commentary is
       generated by an AI model from these numbers only — it explains the
-      ranking, it does not add outside information.</p>
+      ranking, it does not add outside information or decide the filtering.</p>
     <p>This is a research tool, not investment advice. Past factor performance
       does not guarantee future results.</p>
   </footer>
@@ -329,90 +192,115 @@
 </div>
 
 <script>
-const runBtn = document.getElementById('runBtn');
-const quickBtn = document.getElementById('quickBtn');
-const statusDot = document.getElementById('statusDot');
-const statusText = document.getElementById('statusText');
-const listEl = document.getElementById('list');
-const metaRow = document.getElementById('metaRow');
-const overallSection = document.getElementById('overallSection');
-const overallText = document.getElementById('overallText');
-const modeBanner = document.getElementById('modeBanner');
-
-let polling = null;
+// Two independent screener panels, built from the same template. Each mode
+// (primary / broad) polls its own status and renders into its own DOM nodes,
+// so running one never disturbs the other's last result.
+const PANELS = [
+  { mode: 'primary', title: 'Nifty 100', tag: 'primary', buttonLabel: 'Run primary scan' },
+  { mode: 'broad',   title: 'Nifty 250', tag: 'broad',   buttonLabel: 'Run broad scan' },
+];
 
 function fmtPct(x){ return x===null||x===undefined ? '—' : (x*100).toFixed(1)+'%'; }
 function fmtNum(x,d=1){ return x===null||x===undefined ? '—' : Number(x).toFixed(d); }
 
-async function loadCachedResults(){
-  try{
-    const r = await fetch('/api/results');
-    if(r.ok){ render(await r.json()); }
-  }catch(e){}
+function panelHtml(p){
+  return `
+    <section class="panel" data-mode="${p.mode}">
+      <div class="panel-head">
+        <div class="panel-title">${p.title}<span class="panel-tag">${p.tag}</span></div>
+      </div>
+      <div class="controls">
+        <button class="run" id="run-${p.mode}">${p.buttonLabel}</button>
+        <div class="status-line"><span class="dot" id="dot-${p.mode}"></span><span id="statusText-${p.mode}">Not run yet</span></div>
+      </div>
+      <div class="meta" id="meta-${p.mode}"></div>
+      <div class="banner" id="banner-${p.mode}"></div>
+      <section class="overall" id="overall-${p.mode}"><p id="overallText-${p.mode}"></p></section>
+      <div class="list" id="list-${p.mode}">
+        <div class="empty">No results yet for this scan. Click "${p.buttonLabel}" to fetch live
+          prices and fundamentals, apply the eligibility rules, and rank what's left.</div>
+      </div>
+    </section>
+  `;
 }
 
-async function pollStatus(){
-  const r = await fetch('/api/status');
-  const s = await r.json();
-  statusDot.className = 'dot ' + s.status;
-  if(s.status === 'running'){
-    statusText.textContent = s.progress || 'Running…';
-    runBtn.disabled = true; quickBtn.disabled = true;
-  } else if(s.status === 'done'){
-    statusText.textContent = 'Last run complete';
-    runBtn.disabled = false; quickBtn.disabled = false;
-    clearInterval(polling);
-    const rr = await fetch('/api/results');
-    render(await rr.json());
-  } else if(s.status === 'error'){
-    statusText.textContent = 'Failed: ' + (s.error || 'unknown error');
-    runBtn.disabled = false; quickBtn.disabled = false;
-    clearInterval(polling);
-  } else {
-    runBtn.disabled = false; quickBtn.disabled = false;
-  }
-}
+document.getElementById('panels').innerHTML = PANELS.map(panelHtml).join('');
 
-async function startRun(mode){
-  runBtn.disabled = true; quickBtn.disabled = true;
-  statusText.textContent = 'Starting…';
-  statusDot.className = 'dot running';
-  modeBanner.classList.remove('show');
-  await fetch('/api/run?mode=' + mode, {method:'POST'});
-  polling = setInterval(pollStatus, 1800);
-}
+// New Flow 0.1 - separate engine, separate output shape (status badge, 7
+// sub-scores, Key Strengths/Risks, red-flag penalties) - so it gets its own
+// template and renderer rather than reusing panelHtml()/render().
+document.getElementById('panels').insertAdjacentHTML('beforeend', `
+  <section class="panel" data-mode="newflow">
+    <div class="panel-head">
+      <div class="panel-title">New Flow 0.1<span class="panel-tag" style="color:var(--jade);border-color:var(--jade);">deep scan</span></div>
+    </div>
+    <div class="controls">
+      <button class="run" id="run-newflow">Run New Flow 0.1</button>
+      <div class="status-line"><span class="dot" id="dot-newflow"></span><span id="statusText-newflow">Not run yet</span></div>
+    </div>
+    <div class="meta" id="meta-newflow"></div>
+    <div class="banner" id="banner-newflow"></div>
+    <details class="rules" style="margin-top:16px;">
+      <summary>Hard filters &amp; red-flag penalties (New Flow only)</summary>
+      <div id="newflowRulesBody" class="rules-body">Loading…</div>
+    </details>
+    <div class="list" id="list-newflow" style="margin-top:14px;">
+      <div class="empty">No results yet. New Flow runs its own hard filters, 7-bucket
+        scoring and red-flag penalties, separately from the Bharat screeners above.</div>
+    </div>
+  </section>
+`);
 
-runBtn.addEventListener('click', () => startRun('default'));
-quickBtn.addEventListener('click', () => startRun('quick'));
+// small utility quick-scan link at the bottom, doesn't need its own full panel
+document.getElementById('panels').insertAdjacentHTML('beforeend', `
+  <section class="panel" style="padding-top:28px;padding-bottom:28px;">
+    <div class="controls">
+      <button class="run" id="run-quick" style="background:transparent;border:1px solid var(--hair);color:var(--paper);">Quick test scan (30 stocks, ~1 min)</button>
+      <div class="status-line"><span class="dot" id="dot-quick"></span><span id="statusText-quick">Not run yet</span></div>
+    </div>
+    <div class="meta" id="meta-quick"></div>
+    <div class="banner" id="banner-quick"></div>
+    <section class="overall" id="overall-quick"><p id="overallText-quick"></p></section>
+    <div class="list" id="list-quick"></div>
+  </section>
+`);
 
-function render(data){
-  metaRow.innerHTML = `
+const ALL_MODES = ['primary', 'broad', 'newflow', 'quick'];
+const pollers = {};
+
+function render(mode, data){
+  const metaEl = document.getElementById('meta-' + mode);
+  metaEl.innerHTML = `
     <div><b>${data.universe}</b> universe · ${data.universe_size} names</div>
     <div><b>${data.eligible_count}</b> passed eligibility</div>
     <div>as of <b>${data.generated_at || ''}</b></div>
   `;
 
+  const bannerEl = document.getElementById('banner-' + mode);
   if(data.data_mode === 'momentum_only_fallback'){
-    modeBanner.textContent = "Yahoo's fundamentals data wasn't reachable from this server this run, so these results are ranked on price momentum alone (growth/quality/value scores are empty). Fundamentals scoring will resume automatically once reachable.";
-    modeBanner.classList.add('show');
+    bannerEl.textContent = "Yahoo's fundamentals data wasn't reachable from this server this run, so these results are ranked on price momentum alone. Fundamentals scoring will resume automatically once reachable.";
+    bannerEl.classList.add('show');
   } else if(data.data_mode === 'fast'){
-    modeBanner.textContent = "Fast mode: momentum-only scan, fundamentals were skipped on purpose.";
-    modeBanner.classList.add('show');
+    bannerEl.textContent = "Fast mode: momentum-only scan, fundamentals were skipped on purpose.";
+    bannerEl.classList.add('show');
   } else {
-    modeBanner.classList.remove('show');
+    bannerEl.classList.remove('show');
   }
 
+  const overallSection = document.getElementById('overall-' + mode);
+  const overallText = document.getElementById('overallText-' + mode);
   if(data.commentary && data.commentary.overall){
     overallText.textContent = data.commentary.overall;
     overallSection.classList.add('show');
+  } else {
+    overallSection.classList.remove('show');
   }
 
-
+  const listEl = document.getElementById('list-' + mode);
   if(!data.picks || !data.picks.length){
     listEl.innerHTML = '<div class="empty">No stocks passed the eligibility rules this run.</div>';
     return;
   }
-
   const perStock = (data.commentary && data.commentary.per_stock) || {};
   listEl.innerHTML = data.picks.map((p, i) => {
     const cov = p.data_coverage;
@@ -443,7 +331,161 @@ function render(data){
   }).join('');
 }
 
-loadCachedResults();
+const STATUS_COLORS = {
+  'HIGH-QUALITY MOMENTUM': 'var(--jade)',
+  'OUTPERFORMER': 'var(--marigold)',
+  'WATCHLIST': 'var(--paper-dim)',
+  'BELOW THRESHOLD': 'var(--rose)',
+};
+
+function renderNewFlow(data){
+  document.getElementById('meta-newflow').innerHTML = `
+    <div><b>${data.universe}</b> universe · ${data.universe_size} names</div>
+    <div><b>${data.eligible_count}</b> passed hard filters</div>
+    <div>as of <b>${data.generated_at || ''}</b></div>
+  `;
+  const bannerEl = document.getElementById('banner-newflow');
+  if(data.data_mode === 'momentum_only_fallback'){
+    bannerEl.textContent = "Yahoo's fundamentals data wasn't reachable this run - these results are ranked on price momentum alone.";
+    bannerEl.classList.add('show');
+  } else {
+    bannerEl.classList.remove('show');
+  }
+
+  const listEl = document.getElementById('list-newflow');
+  if(!data.picks || !data.picks.length){
+    listEl.innerHTML = '<div class="empty">No stocks passed New Flow\'s hard filters this run.</div>';
+    return;
+  }
+  listEl.innerHTML = data.picks.map((p, i) => {
+    const color = STATUS_COLORS[p.status] || 'var(--paper-dim)';
+    const strengths = (p.key_strengths || []).map(s => `<div>✓ ${s}</div>`).join('');
+    const risks = (p.key_risks || []).map(s => `<div>⚠ ${s}</div>`).join('');
+    return `
+      <div class="row" style="grid-template-columns:36px 1fr auto;">
+        <div class="rank">${String(i+1).padStart(2,'0')}</div>
+        <div class="name-block">
+          <div class="sym">${p.symbol}</div>
+          <div class="co">${p.name || ''}</div>
+          <div class="sector">${p.sector || 'Unknown'}</div>
+          <div class="sector" style="color:${color};border-color:${color};">${p.status}</div>
+          ${p.red_flag_penalty ? `<div class="rationale" style="color:var(--rose);">Red-flag penalty: ${p.red_flag_penalty} pts (${(p.triggered_flags||[]).join(', ')})</div>` : ''}
+          ${strengths ? `<div class="rationale">${strengths}</div>` : ''}
+          ${risks ? `<div class="rationale">${risks}</div>` : ''}
+        </div>
+        <div class="score-block">
+          <div class="score">${fmtNum(p.SCORE,1)}<span> /100</span></div>
+          <div class="subscores">
+            G <b>${fmtNum(p.score_growth,2)}</b> ·
+            Q <b>${fmtNum(p.score_quality,2)}</b> ·
+            EQ <b>${fmtNum(p.score_earnings_quality,2)}</b><br>
+            M <b>${fmtNum(p.score_momentum,2)}</b> ·
+            V <b>${fmtNum(p.score_value,2)}</b> ·
+            R <b>${fmtNum(p.score_risk,2)}</b><br>
+            Own <b>${fmtNum(p.score_ownership,2)}</b>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function loadNewFlowRules(){
+  try{
+    const r = await fetch('/api/config');
+    const c = await r.json();
+    const nf = c.newflow || {};
+    const hf = nf.hard_filters || {};
+    const rows = [
+      ['Market cap', '≥ ₹' + hf.minimum_market_cap_cr + ' cr'],
+      ['Daily turnover', '≥ ₹' + hf.minimum_daily_turnover_cr + ' cr'],
+      ['Listing history', '≥ ' + hf.minimum_listing_history_days + ' days'],
+      ['Promoter pledge', '≤ ' + hf.max_promoter_pledge_pct + '% (only when pledge data supplied)'],
+      ['Extreme debt/equity', '≤ ' + hf.extreme_debt_to_equity + '% (exempt: ' + (hf.skip_leverage_checks_for_sectors||[]).join(', ') + ')'],
+      ['Extreme 1yr dilution', '≤ ' + Math.round((hf.extreme_dilution_1y||0)*100) + '%'],
+      ["Shareholders' equity", hf.require_positive_equity ? '> 0' : 'not checked'],
+    ];
+    const w = nf.weights || {};
+    const weightsLine = Object.entries(w).map(([k,v]) => `${k} ${Math.round(v*100)}%`).join(' · ');
+    const penalties = Object.entries(nf.red_flag_penalties || {})
+      .map(([k,v]) => `<tr><td>${k.replace(/_/g,' ')}</td><td>${v} pts${k==='major_auditor_issue' ? ' (never fires - no data source)' : ''}</td></tr>`).join('');
+    document.getElementById('newflowRulesBody').innerHTML =
+      '<table>' + rows.map(([k,v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('') + '</table>' +
+      `<div class="weights-note">Bucket weights: ${weightsLine}</div>` +
+      '<div class="weights-note" style="margin-top:10px;">Red-flag penalties:</div>' +
+      '<table style="margin-top:4px;">' + penalties + '</table>' +
+      `<div class="exempt-note">Not enforced (no reliable free data source): ${(hf ? 'accounting_red_flag, extreme_circuit_frequency' : '')}</div>`;
+  }catch(e){
+    document.getElementById('newflowRulesBody').textContent = 'Could not load rules.';
+  }
+}
+loadNewFlowRules();
+
+async function loadCached(mode){
+  try{
+    const r = await fetch('/api/results?mode=' + mode);
+    if(r.ok){
+      const data = await r.json();
+      if(mode === 'newflow') renderNewFlow(data); else render(mode, data);
+    }
+  }catch(e){}
+}
+
+async function pollStatus(){
+  const r = await fetch('/api/status');
+  const s = await r.json();
+  for(const mode of ALL_MODES){
+    const dot = document.getElementById('dot-' + mode);
+    const txt = document.getElementById('statusText-' + mode);
+    const btn = document.getElementById('run-' + mode);
+    if(s.status === 'running' && s.mode === mode){
+      dot.className = 'dot running';
+      txt.textContent = s.progress || 'Running…';
+      btn.disabled = true;
+    } else if(s.status === 'running'){
+      // a different mode is running - disable this button too (one scan at a time)
+      btn.disabled = true;
+      if(dot.className.indexOf('running') === -1){ /* leave prior state text alone */ }
+    } else {
+      btn.disabled = false;
+      if(s.status === 'done' && s.mode === mode){
+        dot.className = 'dot done';
+        txt.textContent = 'Last run complete';
+        const rr = await fetch('/api/results?mode=' + mode);
+        if(rr.ok){
+          const data = await rr.json();
+          if(mode === 'newflow') renderNewFlow(data); else render(mode, data);
+        }
+      } else if(s.status === 'error' && s.mode === mode){
+        dot.className = 'dot error';
+        txt.textContent = 'Failed: ' + (s.error || 'unknown error');
+      }
+    }
+  }
+  const anyRunning = (s.status === 'running');
+  if(!anyRunning){ Object.values(pollers).forEach(clearInterval); }
+}
+
+function startPolling(){
+  clearInterval(pollers.main);
+  pollers.main = setInterval(pollStatus, 1800);
+}
+
+async function startRun(mode){
+  for(const m of ALL_MODES) document.getElementById('run-' + m).disabled = true;
+  document.getElementById('statusText-' + mode).textContent = 'Starting…';
+  document.getElementById('dot-' + mode).className = 'dot running';
+  document.getElementById('banner-' + mode).classList.remove('show');
+  await fetch('/api/run?mode=' + mode, {method:'POST'});
+  startPolling();
+}
+
+document.getElementById('run-primary').addEventListener('click', () => startRun('primary'));
+document.getElementById('run-broad').addEventListener('click', () => startRun('broad'));
+document.getElementById('run-newflow').addEventListener('click', () => startRun('newflow'));
+document.getElementById('run-quick').addEventListener('click', () => startRun('quick'));
+
+ALL_MODES.forEach(loadCached);
 pollStatus();
 
 // --- Screening rules panel, pulled live from the running config ------------
@@ -452,6 +494,7 @@ async function loadRules(){
     const r = await fetch('/api/config');
     const c = await r.json();
     const rules = c.eligibility_rules || {};
+    const w = c.weights || {};
     const exemptSectors = (rules.skip_leverage_checks_for_sectors || []).join(', ');
     const rows = [
       ['Market cap', '≥ ₹' + rules.min_market_cap_cr + ' cr'],
@@ -460,11 +503,14 @@ async function loadRules(){
       ['Listed history', '≥ ' + rules.min_history_days + ' trading days'],
       ['Debt / equity', '≤ ' + rules.max_debt_to_equity + '%'],
       ['Interest coverage', '≥ ' + rules.min_interest_coverage + '×'],
-      ['Shareholders\' equity', rules.require_positive_equity ? '> 0' : 'not checked'],
+      ["Shareholders' equity", rules.require_positive_equity ? '> 0' : 'not checked'],
       ['EBITDA', rules.require_positive_ebitda ? '> 0' : 'not checked'],
+      ['Top picks per scan', c.top_n],
+      ['Max picks per sector', c.max_per_sector],
     ];
     document.getElementById('rulesBody').innerHTML =
       '<table>' + rows.map(([k,v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('') + '</table>' +
+      `<div class="weights-note">Bucket weights: Growth ${Math.round((w.growth||0)*100)}% · Quality ${Math.round((w.quality||0)*100)}% · Value ${Math.round((w.value||0)*100)}% · Momentum ${Math.round((w.momentum||0)*100)}% · Risk ${Math.round((w.risk||0)*100)}%</div>` +
       (exemptSectors ? `<div class="exempt-note">Debt/equity and interest coverage are not applied to: ${exemptSectors} — deposits/customer liabilities make those ratios structurally different for lenders, not a sign of distress.</div>` : '');
   }catch(e){
     document.getElementById('rulesBody').textContent = 'Could not load rules.';
@@ -474,15 +520,17 @@ loadRules();
 
 // --- Stock lookup: "why isn't X in the list" -------------------------------
 const lookupInput = document.getElementById('lookupInput');
+const lookupModeSel = document.getElementById('lookupMode');
 const lookupBtn = document.getElementById('lookupBtn');
 const lookupResult = document.getElementById('lookupResult');
 
 async function doLookup(){
   const sym = lookupInput.value.trim().toUpperCase();
   if(!sym) return;
+  const mode = lookupModeSel.value;
   lookupResult.textContent = 'Checking…';
   try{
-    const r = await fetch('/api/lookup/' + encodeURIComponent(sym));
+    const r = await fetch('/api/lookup/' + encodeURIComponent(sym) + '?mode=' + mode);
     if(r.status === 404){
       const j = await r.json();
       lookupResult.textContent = j.detail;
@@ -502,12 +550,11 @@ async function doLookup(){
         (d.sector ? ` · sector: ${d.sector}` : '');
     }
   }catch(e){
-    lookupResult.textContent = 'Lookup failed - is a scan cached yet?';
+    lookupResult.textContent = 'Lookup failed - is a scan cached yet for that mode?';
   }
 }
 lookupBtn.addEventListener('click', doLookup);
 lookupInput.addEventListener('keydown', e => { if(e.key === 'Enter') doLookup(); });
-
 </script>
 </body>
 </html>
