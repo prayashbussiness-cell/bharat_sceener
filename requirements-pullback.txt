@@ -1,0 +1,6 @@
+# Only what the Pull Back screener needs beyond the host repo's existing
+# requirements.txt (FastAPI/uvicorn already covered there).
+pandas>=2.0
+numpy>=1.24
+yfinance>=0.2.40
+pytest>=7.0   # optional, for running tests/test_pullback_engine.py
