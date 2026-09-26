@@ -1,0 +1,146 @@
+<!-- ============================================================
+     Pull Back screener tab - drop-in fragment.
+     Wiring instructions are in README_PULLBACK.md (section "Wiring into the existing UI").
+     Self-contained: its own button, own poll loop, own result table/detail panel;
+     shares no JS state with the Bharat / New Flow screener tabs.
+     ============================================================ -->
+<section id="pullback-tab" class="screener-tab" style="display:none">
+  <div class="pb-toolbar">
+    <button id="pb-run-btn" class="pb-btn">Run Pull Back scan</button>
+    <button id="pb-run-quick-btn" class="pb-btn pb-btn-secondary">Quick scan</button>
+    <span id="pb-status" class="pb-status">idle</span>
+    <input id="pb-lookup-input" placeholder="Lookup symbol (e.g. RELIANCE)" class="pb-input"/>
+    <button id="pb-lookup-btn" class="pb-btn pb-btn-secondary">Lookup</button>
+  </div>
+
+  <p class="pb-note">
+    Technical-only setup screener: established uptrend &rarr; controlled pullback &rarr;
+    seller exhaustion &rarr; confirmed reversal trigger. States range from
+    <code>NO_SETUP</code> to <code>ENTRY_TRIGGER</code>; a stock that breaks major
+    support is always <code>INVALIDATED</code> regardless of score.
+  </p>
+
+  <table id="pb-table" class="pb-table">
+    <thead>
+      <tr>
+        <th>Symbol</th><th>State</th><th>Score</th><th>Pullback %</th><th>Pullback (ATR)</th>
+        <th>Support confluence</th><th>RSI</th><th>Trigger</th><th>Overextension</th><th></th>
+      </tr>
+    </thead>
+    <tbody id="pb-tbody"></tbody>
+  </table>
+
+  <div id="pb-detail" class="pb-detail" style="display:none"></div>
+</section>
+
+<style>
+  .pb-toolbar{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.75rem}
+  .pb-btn{padding:.5rem 1rem;border-radius:6px;border:1px solid #d0d0d0;background:#1e5eff;color:#fff;cursor:pointer}
+  .pb-btn-secondary{background:#fff;color:#1e5eff}
+  .pb-status{font-size:.85rem;color:#666;margin-left:.25rem}
+  .pb-input{padding:.4rem .6rem;border:1px solid #d0d0d0;border-radius:6px}
+  .pb-note{font-size:.85rem;color:#555;max-width:60rem}
+  .pb-table{width:100%;border-collapse:collapse;font-size:.85rem}
+  .pb-table th,.pb-table td{padding:.4rem .6rem;border-bottom:1px solid #eee;text-align:left}
+  .pb-state-ENTRY_TRIGGER{color:#0a7a2f;font-weight:600}
+  .pb-state-PULLBACK_SETUP{color:#1e5eff;font-weight:600}
+  .pb-state-PULLBACK_DEVELOPING{color:#8a6d00}
+  .pb-state-WATCHLIST{color:#888}
+  .pb-state-NO_SETUP{color:#aaa}
+  .pb-state-INVALIDATED{color:#c62828;text-decoration:line-through}
+  .pb-detail{margin-top:1rem;padding:1rem;border:1px solid #eee;border-radius:8px;background:#fafafa;font-size:.85rem;white-space:pre-wrap}
+</style>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  let pbPollTimer = null;
+
+  async function pbFetchJSON(url, opts) {
+    const r = await fetch(url, opts);
+    if (!r.ok) throw new Error(`${url} -> ${r.status}`);
+    return r.json();
+  }
+
+  function pbRenderTable(payload) {
+    const tbody = $("pb-tbody");
+    tbody.innerHTML = "";
+    (payload.results || []).forEach((r) => {
+      const tr = document.createElement("tr");
+      const trg = r.entry ? r.entry.trigger_tier : "-";
+      tr.innerHTML = `
+        <td><a href="#" class="pb-sym-link" data-sym="${r.symbol}">${r.symbol}</a></td>
+        <td class="pb-state-${r.state}">${r.state}</td>
+        <td>${r.score}</td>
+        <td>${r.pullback ? r.pullback.pullback_pct : "-"}%</td>
+        <td>${r.pullback ? r.pullback.pullback_atr : "-"}</td>
+        <td>${r.support ? r.support.support_confluence_count : "-"}</td>
+        <td>${r.momentum ? r.momentum.rsi14 : "-"}</td>
+        <td>${trg}</td>
+        <td>${r.overextension ? r.overextension.status : "-"}</td>
+        <td><a href="#" class="pb-detail-link" data-sym="${r.symbol}">details</a></td>`;
+      tbody.appendChild(tr);
+    });
+    tbody.querySelectorAll(".pb-sym-link, .pb-detail-link").forEach((a) =>
+      a.addEventListener("click", (e) => {
+        e.preventDefault();
+        pbShowDetail(e.target.dataset.sym, payload);
+      })
+    );
+  }
+
+  function pbShowDetail(sym, payload) {
+    const r = (payload.results || []).find((x) => x.symbol === sym);
+    if (!r) return;
+    const d = $("pb-detail");
+    d.style.display = "block";
+    d.textContent = JSON.stringify(r, null, 2);
+  }
+
+  async function pbPoll() {
+    const s = await pbFetchJSON("/api/pullback/status");
+    $("pb-status").textContent = s.status === "running"
+      ? `running (${s.progress.done}/${s.progress.total})` : s.status;
+    if (s.status === "done" || s.status === "error") {
+      clearInterval(pbPollTimer);
+      if (s.status === "done") {
+        const payload = await pbFetchJSON("/api/pullback/results");
+        pbRenderTable(payload);
+      } else {
+        $("pb-status").textContent = "error: " + (s.error || "unknown");
+      }
+    }
+  }
+
+  async function pbStartRun(quick) {
+    $("pb-status").textContent = "starting...";
+    await pbFetchJSON(`/api/pullback/run?quick=${quick}`, { method: "POST" });
+    clearInterval(pbPollTimer);
+    pbPollTimer = setInterval(pbPoll, 2000);
+  }
+
+  $("pb-run-btn") && $("pb-run-btn").addEventListener("click", () => pbStartRun(false));
+  $("pb-run-quick-btn") && $("pb-run-quick-btn").addEventListener("click", () => pbStartRun(true));
+  $("pb-lookup-btn") && $("pb-lookup-btn").addEventListener("click", async () => {
+    const sym = $("pb-lookup-input").value.trim().toUpperCase();
+    if (!sym) return;
+    $("pb-status").textContent = "looking up " + sym + "...";
+    try {
+      const r = await pbFetchJSON(`/api/pullback/lookup/${sym}`);
+      pbRenderTable({ results: [Object.assign({ symbol: sym }, r)] });
+      pbShowDetail(sym, { results: [Object.assign({ symbol: sym }, r)] });
+      $("pb-status").textContent = "idle";
+    } catch (e) {
+      $("pb-status").textContent = "lookup failed: " + e.message;
+    }
+  });
+
+  // Load the last cached scan on first paint of this tab, same pattern as the other screeners.
+  document.addEventListener("DOMContentLoaded", async () => {
+    try {
+      const payload = await pbFetchJSON("/api/pullback/results");
+      pbRenderTable(payload);
+    } catch (e) { /* no cached scan yet - fine */ }
+  });
+})();
+</script>
