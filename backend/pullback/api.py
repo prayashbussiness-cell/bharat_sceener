@@ -49,6 +49,7 @@ def _run_scan(universe, top_n, quick):
     symbols = DS.universe_symbols("quicklist" if quick else universe)
     results, errors = [], []
     _job["progress"] = {"done": 0, "total": len(symbols)}
+    DS.bulk_prefetch(symbols)  # one batched request for the whole universe, see data_source.py
     for sym in symbols:
         try:
             df = DS.get_ohlcv(sym)

@@ -49,6 +49,14 @@
   }
   .lede{color:var(--paper-dim);font-size:15.5px;max-width:62ch;margin:0;}
 
+  .section-nav{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px;}
+  .section-nav a{
+    font-size:12.5px;color:var(--paper-dim);text-decoration:none;
+    border:1px solid var(--hair);border-radius:var(--radius);padding:6px 12px;
+    transition:color .12s ease, border-color .12s ease;
+  }
+  .section-nav a:hover{color:var(--marigold);border-color:var(--marigold-dim);}
+
   details.rules{margin-top:22px;font-size:13.5px;color:var(--paper-dim);}
   details.rules summary{cursor:pointer;color:var(--paper);font-weight:500;padding:4px 0;}
   .rules-body{padding:12px 0 4px;}
@@ -169,6 +177,14 @@
       live market data — nothing here is pre-written.
     </p>
 
+    <nav class="section-nav">
+      <a href="#panel-primary">Nifty 100</a>
+      <a href="#panel-broad">Nifty 250</a>
+      <a href="#panel-newflow">New Flow 0.1</a>
+      <a href="#panel-pullback">Pull Back</a>
+      <a href="#panel-quick">Quick test</a>
+    </nav>
+
     <details class="rules">
       <summary>Screening rules &amp; weights used</summary>
       <div id="rulesBody" class="rules-body">Loading…</div>
@@ -180,6 +196,7 @@
         <option value="primary">in Nifty 100 (primary) scan</option>
         <option value="broad" selected>in Nifty 250 (broad) scan</option>
         <option value="newflow">in New Flow 0.1 scan</option>
+        <option value="pullback">in Pull Back scan</option>
       </select>
       <button id="lookupBtn">Check</button>
     </div>
@@ -214,7 +231,7 @@ function fmtNum(x,d=1){ return x===null||x===undefined ? '—' : Number(x).toFix
 
 function panelHtml(p){
   return `
-    <section class="panel" data-mode="${p.mode}">
+    <section class="panel" id="panel-${p.mode}" data-mode="${p.mode}">
       <div class="panel-head">
         <div class="panel-title">${p.title}<span class="panel-tag">${p.tag}</span></div>
       </div>
@@ -239,7 +256,7 @@ document.getElementById('panels').innerHTML = PANELS.map(panelHtml).join('');
 // sub-scores, Key Strengths/Risks, red-flag penalties) - so it gets its own
 // template and renderer rather than reusing panelHtml()/render().
 document.getElementById('panels').insertAdjacentHTML('beforeend', `
-  <section class="panel" data-mode="newflow">
+  <section class="panel" id="panel-newflow" data-mode="newflow">
     <div class="panel-head">
       <div class="panel-title">New Flow 0.1<span class="panel-tag" style="color:var(--jade);border-color:var(--jade);">deep scan</span></div>
     </div>
@@ -265,7 +282,7 @@ document.getElementById('panels').insertAdjacentHTML('beforeend', `
 // the backend (/api/pullback/*), so it gets its own template, renderer and
 // poll loop rather than reusing the primary/broad ALL_MODES machinery.
 document.getElementById('panels').insertAdjacentHTML('beforeend', `
-  <section class="panel" data-mode="pullback">
+  <section class="panel" id="panel-pullback" data-mode="pullback">
     <div class="panel-head">
       <div class="panel-title">Pull Back<span class="panel-tag" style="color:var(--jade);border-color:var(--jade);">technical only</span></div>
     </div>
@@ -294,7 +311,7 @@ document.getElementById('panels').insertAdjacentHTML('beforeend', `
 
 // small utility quick-scan link at the bottom, doesn't need its own full panel
 document.getElementById('panels').insertAdjacentHTML('beforeend', `
-  <section class="panel" style="padding-top:28px;padding-bottom:28px;">
+  <section class="panel" id="panel-quick" style="padding-top:28px;padding-bottom:28px;">
     <div class="controls">
       <button class="run" id="run-quick" style="background:transparent;border:1px solid var(--hair);color:var(--paper);">Quick test scan (30 stocks, ~1 min)</button>
       <div class="status-line"><span class="dot" id="dot-quick"></span><span id="statusText-quick">Not run yet</span></div>
@@ -724,6 +741,28 @@ async function doLookup(){
   if(!sym) return;
   const mode = lookupModeSel.value;
   lookupResult.textContent = 'Checking…';
+
+  // Pull Back has its own engine/endpoint and result shape (state machine,
+  // not eligible/ineligible), so it's handled separately here.
+  if(mode === 'pullback'){
+    try{
+      const r = await fetch('/api/pullback/lookup/' + encodeURIComponent(sym));
+      if(!r.ok){
+        const j = await r.json().catch(() => ({}));
+        lookupResult.textContent = j.detail || `${sym} — no usable price data.`;
+        return;
+      }
+      const d = await r.json();
+      const color = PB_STATE_COLORS[d.state] || 'var(--paper-dim)';
+      lookupResult.innerHTML = `<span style="color:${color};"><b>${sym}</b> — ${d.state.replace(/_/g,' ')}</span>` +
+        ` · score <b>${fmtNum(d.score,1)}</b>/100`;
+      pbRenderList({ results: [Object.assign({ symbol: sym }, d)] });
+    }catch(e){
+      lookupResult.textContent = 'Lookup failed.';
+    }
+    return;
+  }
+
   try{
     const r = await fetch('/api/lookup/' + encodeURIComponent(sym) + '?mode=' + mode);
     if(r.status === 404){

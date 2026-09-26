@@ -38,6 +38,40 @@ def _yf_fetch(symbol):
     return df
 
 
+def bulk_prefetch(symbols, period="3y"):
+    """Warm the cache for many symbols with ONE batched yfinance call instead
+    of one yf.Ticker(...).history() call per symbol. Scanning a couple hundred
+    symbols one at a time is exactly the pattern that trips Yahoo's crumb/
+    rate-limiting (HTTP 429/401) - batching, like the host app's own
+    fetch_prices() already does for the primary/broad screeners, is far less
+    likely to get rate-limited. Any symbol the batch call misses just falls
+    through to the normal per-symbol fetch in get_ohlcv() as before, so this
+    is purely an optimization: it never removes a symbol from the scan.
+    """
+    if not symbols:
+        return
+    try:
+        import yfinance as yf
+        tickers = [s if s.endswith((".NS", ".BO")) else s + ".NS" for s in symbols]
+        data = yf.download(tickers, period=period, interval="1d",
+                            auto_adjust=False, group_by="ticker",
+                            threads=True, progress=False)
+        if data is None or data.empty:
+            return
+        now = time.time()
+        multi = len(tickers) > 1
+        for sym, tk in zip(symbols, tickers):
+            try:
+                sub = data[tk] if multi else data
+                sub = sub.rename(columns=str.lower)[["open", "high", "low", "close", "volume"]].dropna(how="all")
+                if not sub.empty:
+                    _CACHE[sym.upper()] = (now, sub)
+            except Exception:
+                continue  # this symbol wasn't in the batch result - fine, per-symbol fetch will catch it
+    except Exception as e:
+        log.warning("bulk prefetch failed, falling back to per-symbol fetch: %s", e)
+
+
 def get_ohlcv(symbol, cache_hours=12):
     key = symbol.upper()
     now = time.time()
@@ -59,7 +93,18 @@ def universe_symbols(name="quicklist"):
         for fn in ("get_universe", "load_universe", "universe_symbols"):
             f = getattr(core, fn, None)
             if callable(f):
-                return list(f(name))
+                result = f(name)
+                # load_universe() (the function that actually exists on the
+                # host's engine_core) returns a DataFrame with columns
+                # symbol/name/nse_sector - list(df) on a DataFrame yields its
+                # COLUMN NAMES ('symbol','name','nse_sector'), not the rows,
+                # so pull the symbol column explicitly. Any other callable
+                # that already returns a plain list/iterable of tickers is
+                # passed through unchanged.
+                if hasattr(result, "columns"):
+                    col = "symbol" if "symbol" in result.columns else result.columns[0]
+                    return [str(s).strip().upper() for s in result[col].tolist() if str(s).strip()]
+                return [str(s).strip().upper() for s in result]
     except Exception as e:
         log.warning("host universe lookup failed: %s", e)
     quicklist = ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "LT", "SBIN",
