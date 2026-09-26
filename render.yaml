@@ -17,6 +17,10 @@ services:
         value: nifty100
       - key: SCREEN_UNIVERSE_BROAD
         value: nifty250
+      - key: SCREEN_UNIVERSE_PULLBACK
+        value: nifty250
+      - key: SCREEN_TOP_N_PULLBACK
+        value: "40"
       - key: SCREEN_TOP_N
         value: "20"
       - key: SCREEN_MAX_PER_SECTOR

@@ -138,6 +138,15 @@
 
   .empty{padding:36px 0;color:var(--paper-dim);font-size:14px;max-width:52ch;}
 
+  /* --- Pull Back panel -------------------------------------------------- */
+  .pb-controls-extra{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px;}
+  .pb-note{color:var(--paper-dim);font-size:13.5px;max-width:66ch;margin:14px 0 0;}
+  .detail-link{color:var(--marigold-dim);font-size:11.5px;cursor:pointer;margin-top:8px;display:inline-block;}
+  .detail-link:hover{color:var(--marigold);}
+  .pb-detail{margin-top:12px;padding:14px 16px;border:1px solid var(--hair);border-radius:var(--radius);
+    background:var(--ink-raised);font-family:'IBM Plex Mono',monospace;font-size:11px;
+    white-space:pre-wrap;color:var(--paper-dim);max-height:420px;overflow:auto;}
+
   footer{padding:28px 0 56px;font-size:12.5px;color:var(--paper-dim);}
   footer p{max-width:72ch;margin:0 0 10px;}
 
@@ -247,6 +256,38 @@ document.getElementById('panels').insertAdjacentHTML('beforeend', `
     <div class="list" id="list-newflow" style="margin-top:14px;">
       <div class="empty">No results yet. New Flow runs its own hard filters, 7-bucket
         scoring and red-flag penalties, separately from the Bharat screeners above.</div>
+    </div>
+  </section>
+`);
+
+// Pull Back - technical-only setup screener (Trend -> Impulse -> Controlled
+// pullback -> Seller exhaustion -> Trigger). Its own engine, own job/cache on
+// the backend (/api/pullback/*), so it gets its own template, renderer and
+// poll loop rather than reusing the primary/broad ALL_MODES machinery.
+document.getElementById('panels').insertAdjacentHTML('beforeend', `
+  <section class="panel" data-mode="pullback">
+    <div class="panel-head">
+      <div class="panel-title">Pull Back<span class="panel-tag" style="color:var(--jade);border-color:var(--jade);">technical only</span></div>
+    </div>
+    <div class="controls">
+      <button class="run" id="run-pullback">Run Pull Back scan</button>
+      <div class="status-line"><span class="dot" id="dot-pullback"></span><span id="statusText-pullback">Not run yet</span></div>
+    </div>
+    <div class="pb-controls-extra">
+      <button class="run" id="run-pullback-quick" style="background:transparent;border:1px solid var(--hair);color:var(--paper);">Quick scan (curated watchlist)</button>
+      <input type="text" id="pbLookupInput" placeholder="Check a specific stock, e.g. RELIANCE" autocomplete="off"
+        style="background:var(--ink-raised);border:1px solid var(--hair);color:var(--paper);font-family:'IBM Plex Mono',monospace;font-size:13px;padding:9px 12px;border-radius:var(--radius);width:230px;">
+      <button id="pbLookupBtn" style="background:transparent;border:1px solid var(--hair);color:var(--paper);font-family:'Work Sans',sans-serif;font-size:13px;padding:9px 16px;border-radius:var(--radius);cursor:pointer;">Check</button>
+    </div>
+    <div class="meta" id="meta-pullback"></div>
+    <p class="pb-note">Established uptrend &rarr; controlled pullback &rarr; seller exhaustion &rarr;
+      confirmed reversal trigger, technical factors only. States run
+      NO_SETUP &rarr; WATCHLIST &rarr; PULLBACK_DEVELOPING &rarr; PULLBACK_SETUP &rarr; ENTRY_TRIGGER;
+      a stock that breaks major support is always INVALIDATED regardless of score.</p>
+    <div id="pbLookupResult" class="lookup-result"></div>
+    <div class="list" id="list-pullback">
+      <div class="empty">No results yet. Click "Run Pull Back scan" to fetch live prices and
+        evaluate the trend &rarr; pullback &rarr; seller-exhaustion &rarr; trigger sequence.</div>
     </div>
   </section>
 `);
@@ -420,6 +461,160 @@ async function loadNewFlowRules(){
   }
 }
 loadNewFlowRules();
+
+// --- Pull Back panel: own engine, own job/cache endpoints, own poll loop ---
+const PB_STATE_COLORS = {
+  ENTRY_TRIGGER: 'var(--jade)',
+  PULLBACK_SETUP: 'var(--marigold)',
+  PULLBACK_DEVELOPING: 'var(--marigold-dim)',
+  WATCHLIST: 'var(--paper-dim)',
+  NO_SETUP: 'var(--paper-dim)',
+  INVALIDATED: 'var(--rose)',
+};
+let pbPoller = null;
+let pbLastPayload = null;
+
+function pbRenderList(payload){
+  pbLastPayload = payload;
+  const listEl = document.getElementById('list-pullback');
+  const results = payload.results || [];
+  if(!results.length){
+    listEl.innerHTML = '<div class="empty">No stocks reached a scored state this run.</div>';
+    return;
+  }
+  listEl.innerHTML = results.map((r, i) => {
+    const color = PB_STATE_COLORS[r.state] || 'var(--paper-dim)';
+    const pb = r.pullback || {}, sup = r.support || {}, mom = r.momentum || {},
+          ent = r.entry || {}, ext = r.overextension || {};
+    const warnings = (r.warnings || []).map(w => `<div>&#9888; ${w}</div>`).join('');
+    return `
+      <div class="row">
+        <div class="rank">${String(i+1).padStart(2,'0')}</div>
+        <div class="name-block">
+          <div class="sym">${r.symbol}</div>
+          <div class="sector" style="color:${color};border-color:${color};">${r.state.replace(/_/g,' ')}</div>
+          ${warnings ? `<div class="rationale">${warnings}</div>` : ''}
+          <span class="detail-link" data-sym="${r.symbol}">view full breakdown</span>
+          <div class="pb-detail" id="pbdetail-${r.symbol}" style="display:none;"></div>
+        </div>
+        <div class="score-block">
+          <div class="score">${fmtNum(r.score,1)}<span> /100</span></div>
+          <div class="subscores">
+            Pullback <b>${fmtNum(pb.pullback_pct,1)}%</b> · ATR <b>${fmtNum(pb.pullback_atr,2)}</b><br>
+            Support <b>${sup.support_confluence_count ?? '—'}</b> groups · RSI <b>${fmtNum(mom.rsi14,1)}</b><br>
+            Trigger <b>${ent.trigger_tier || 'none'}</b> · ${ext.status || '—'}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+  listEl.querySelectorAll('.detail-link').forEach(el => el.addEventListener('click', () => {
+    const sym = el.dataset.sym;
+    const d = document.getElementById('pbdetail-' + sym);
+    if(d.style.display === 'none'){
+      const r = results.find(x => x.symbol === sym);
+      d.textContent = JSON.stringify(r, null, 2);
+      d.style.display = 'block';
+      el.textContent = 'hide full breakdown';
+    } else {
+      d.style.display = 'none';
+      el.textContent = 'view full breakdown';
+    }
+  }));
+}
+
+function pbUpdateMeta(payload){
+  document.getElementById('meta-pullback').innerHTML = `
+    <div><b>${payload.universe || '—'}</b> universe${payload.quick ? ' (quick)' : ''} · ${payload.count ?? 0} scanned</div>
+    <div>as of <b>${payload.generated_at || ''}</b></div>
+    ${payload.errors && payload.errors.length ? `<div>${payload.errors.length} symbol(s) skipped (no data)</div>` : ''}
+  `;
+}
+
+async function pbLoadCached(){
+  try{
+    const r = await fetch('/api/pullback/results');
+    if(r.ok){
+      const data = await r.json();
+      pbUpdateMeta(data);
+      pbRenderList(data);
+    }
+  }catch(e){}
+}
+
+async function pbPollStatus(){
+  const r = await fetch('/api/pullback/status');
+  const s = await r.json();
+  const dot = document.getElementById('dot-pullback');
+  const txt = document.getElementById('statusText-pullback');
+  const btn = document.getElementById('run-pullback');
+  const qbtn = document.getElementById('run-pullback-quick');
+  if(s.status === 'running'){
+    dot.className = 'dot running';
+    const p = s.progress || {};
+    txt.textContent = p.total ? `Running (${p.done}/${p.total})` : 'Running…';
+    btn.disabled = true; qbtn.disabled = true;
+  } else {
+    btn.disabled = false; qbtn.disabled = false;
+    clearInterval(pbPoller);
+    if(s.status === 'done'){
+      dot.className = 'dot done';
+      txt.textContent = 'Last run complete';
+      const rr = await fetch('/api/pullback/results');
+      if(rr.ok){
+        const data = await rr.json();
+        pbUpdateMeta(data);
+        pbRenderList(data);
+      }
+    } else if(s.status === 'error'){
+      dot.className = 'dot error';
+      txt.textContent = 'Failed: ' + (s.error || 'unknown error');
+    }
+  }
+}
+
+async function pbStartRun(quick){
+  document.getElementById('run-pullback').disabled = true;
+  document.getElementById('run-pullback-quick').disabled = true;
+  document.getElementById('statusText-pullback').textContent = 'Starting…';
+  document.getElementById('dot-pullback').className = 'dot running';
+  const universe = quick ? 'quicklist' : 'nifty250';
+  await fetch(`/api/pullback/run?universe=${universe}&quick=${quick}`, {method:'POST'});
+  clearInterval(pbPoller);
+  pbPoller = setInterval(pbPollStatus, 1800);
+}
+
+document.getElementById('run-pullback').addEventListener('click', () => pbStartRun(false));
+document.getElementById('run-pullback-quick').addEventListener('click', () => pbStartRun(true));
+
+document.getElementById('pbLookupBtn').addEventListener('click', pbDoLookup);
+document.getElementById('pbLookupInput').addEventListener('keydown', e => { if(e.key === 'Enter') pbDoLookup(); });
+
+async function pbDoLookup(){
+  const input = document.getElementById('pbLookupInput');
+  const sym = input.value.trim().toUpperCase();
+  if(!sym) return;
+  const resultEl = document.getElementById('pbLookupResult');
+  resultEl.textContent = 'Checking…';
+  try{
+    const r = await fetch('/api/pullback/lookup/' + encodeURIComponent(sym));
+    if(!r.ok){
+      const j = await r.json().catch(() => ({}));
+      resultEl.textContent = j.detail || `${sym} — no usable price data.`;
+      return;
+    }
+    const d = await r.json();
+    const color = PB_STATE_COLORS[d.state] || 'var(--paper-dim)';
+    resultEl.innerHTML = `<span style="color:${color};"><b>${sym}</b> — ${d.state.replace(/_/g,' ')}</span>` +
+      ` · score <b>${fmtNum(d.score,1)}</b>/100`;
+    pbRenderList({ results: [Object.assign({ symbol: sym }, d)] });
+  }catch(e){
+    resultEl.textContent = 'Lookup failed.';
+  }
+}
+
+pbLoadCached();
+pbPollStatus();
 
 async function loadCached(mode){
   try{

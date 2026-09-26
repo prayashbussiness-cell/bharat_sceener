@@ -31,6 +31,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.engine_core import run_screen, BUCKET_WEIGHTS
 from backend.newflow_engine import run_newflow_screen
+from backend.pullback.api import router as pullback_router
 
 from backend.gemini_summary import generate_commentary
 
@@ -69,6 +70,11 @@ def _result_file(mode: str) -> str:
 
 app = FastAPI(title="Bharat Top Performing Stocks")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# Pull Back screener - a fully independent technical-only screener (its own
+# scoring engine, job state and cache file at data/last_result_pullback.json)
+# mounted at /api/pullback/*. See backend/pullback/mount_snippet.py.
+app.include_router(pullback_router)
 
 # ---------------------------------------------------------------------------
 # In-memory job state (single worker process assumption - see README for
