@@ -62,13 +62,15 @@ one instance/one worker unless you move job state into something shared
 
 | Var | Default | What it does |
 |---|---|---|
-| `GEMINI_API_KEY` | — | required for AI commentary; app still works without it, just skips the rationale text |
+| `GEMINI_API_KEY` | — | required for AI commentary on the Bharat screeners; app still works without it, just skips the rationale text. Not used by New Flow 0.1 (it never calls Gemini). |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | swap for `gemini-2.5-pro` for slightly better prose, slower/costlier |
 | `ENABLE_GEMINI` | `true` | set `false` to skip the Gemini call entirely |
-| `SCREEN_UNIVERSE` | `nifty250` | or `nifty200`, `nifty500`, `midsmall400` |
-| `SCREEN_TOP_N` | `15` | how many picks to return |
+| `SCREEN_UNIVERSE_PRIMARY` | `nifty100` | universe for the "Primary" button |
+| `SCREEN_UNIVERSE_BROAD` | `nifty250` | universe for the "Broad" button; or `nifty200`, `nifty500`, `midsmall400` |
+| `SCREEN_UNIVERSE_NEWFLOW` | `nifty250` | universe for the New Flow 0.1 button |
+| `SCREEN_TOP_N` | `20` | how many picks to return, per screen |
 | `SCREEN_MAX_PER_SECTOR` | `4` | sector concentration cap |
-| `SCREEN_FAST_MODE` | `false` | `true` = momentum-only, skips fundamentals entirely (~1 min instead of ~5–10 min) |
+| `SCREEN_FAST_MODE` | `false` | `true` = momentum-only for the Bharat screeners, skips fundamentals entirely (~1 min instead of ~5–10 min). Doesn't apply to New Flow 0.1, which always needs fundamentals for its hard filters. |
 
 ## Two real risks, already handled but worth knowing about
 
@@ -279,3 +281,69 @@ doesn't call Gemini at all.
 weights, and red-flag penalty table.
 
 New env var: `SCREEN_UNIVERSE_NEWFLOW` (default `nifty250`).
+
+## Progress bar
+
+Every panel now shows an actual progress bar during a run, not just a
+status dot. The backend doesn't have each engine report a percentage
+directly - instead, `main.py` maps known log-message patterns from any
+engine (universe loading, price download, fundamentals fetch progress like
+"fundamentals 75/250", scoring, Gemini commentary) to a rough 0-100 stage
+estimate in one place (`_progress_from_message`), so it works for all three
+engines without each one needing to agree on a shared scale. The percentage
+never moves backwards even if a later message maps to an earlier stage.
+
+## Technical Analysis - a third, fully independent engine
+
+A fourth button, built from a supplied ~30-indicator spec. This one is
+meaningfully more robust to host than the other two: it needs only daily
+OHLCV price history, which comes from a different, unauthenticated Yahoo
+endpoint that has stayed reachable even during the fundamentals-blocking
+issues documented earlier in this README. No crumb dependency, no NSE
+constituent-list dependency beyond the shared universe loader (same
+fallback mechanism as the others).
+
+**6 buckets, weights exactly as specified:** Trend 35% / Momentum 20% /
+Volume 15% / Volatility 10% / Breakout 10% / Correction 10%.
+
+**Design choice worth knowing:** unlike Bharat Screener and New Flow, this
+engine's z-scores are **not sector-neutral** - they're computed across the
+whole scanned universe directly. Sector-relative scoring exists to stop a
+screen rewarding whichever sector has structurally different valuation or
+margin norms; that reasoning doesn't apply to RSI, MACD, or distance from a
+moving average, which mean the same thing regardless of what business a
+company is in.
+
+**What's computed for real** (all ~30 factors from the spec, organised into
+the 6 buckets): price vs 20 EMA/50/100/200 DMA, 20 EMA vs 50 EMA, golden
+cross, 50/200 DMA slope, Supertrend (daily *and* weekly, resampled), ADX
+and +DI/-DI, RSI(14) and its slope, MACD line/signal/histogram and
+histogram trend, Stochastic %K-%D, 20D/60D rate of change, volume vs
+20-day average, breakout volume ratio, up/down volume ratio, OBV trend and
+its alignment with price (bearish-divergence check), Accumulation/
+Distribution line trend, ATR% and 12-month realised volatility, distance
+from 52-week high, and ATR-scaled distance from the 20 EMA (used once as a
+breakout-strength signal, once as an overextension-risk signal - same
+underlying number, opposite framing, kept under separate column names so
+the two buckets can't collide on a shared z-score).
+
+**Correction risk labels are relative, not fixed thresholds.** The spec's
+example table (+3% healthy, +8% strong, +15% stretched, +25% very
+stretched) also said "the exact thresholds should be backtested rather
+than assumed" - so rather than hard-code guessed cutoffs, the LOW/MODERATE/
+HIGH label is relative to the current scan's own distribution of
+overextension, consistent with how every other bucket in this project
+scores. Worth knowing when comparing labels across two different runs.
+
+**Per-stock output** is a deterministic summary block in the requested
+style (Supertrend/RSI/MACD/50DMA-200DMA/Volume/price-vs-EMA/Correction
+risk) - not LLM-generated, same design philosophy as New Flow. No Gemini
+call for this engine either.
+
+### API
+
+`POST /api/run?mode=technical`, `GET /api/results?mode=technical`,
+`GET /api/lookup/{symbol}?mode=technical`. `GET /api/config` includes a
+`technical` block with its filters and bucket weights.
+
+New env var: `SCREEN_UNIVERSE_TECHNICAL` (default `nifty250`).

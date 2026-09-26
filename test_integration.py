@@ -437,6 +437,197 @@ def test_web_newflow_mode():
     print("New Flow web integration OK: own mode, own config block, own cache file, reachable end-to-end")
 
 
+# ============================================================================
+# Technical Analysis - third independent engine. No fundamentals dependency
+# at all, so these tests focus on the indicator math wiring, filters, and
+# scoring - the indicators themselves were sanity-checked standalone
+# (bounded RSI/ADX, Supertrend in {+1,-1}) before this suite was written.
+# ============================================================================
+import backend.technical_engine as tech
+
+
+def _make_synthetic_ohlcv(symbols, n_days=420, seed=1, vol_level=14):
+    rng2 = np.random.default_rng(seed)
+    dates = pd.date_range("2024-01-01", periods=n_days, freq="B")
+    frames = {}
+    for sym in symbols:
+        drift = rng2.uniform(-0.0003, 0.0012)
+        ret = rng2.normal(drift, 0.018, n_days)
+        close = 100 * np.cumprod(1 + ret)
+        high = close * (1 + rng2.uniform(0, 0.015, n_days))
+        low = close * (1 - rng2.uniform(0, 0.015, n_days))
+        openp = close * (1 + rng2.uniform(-0.005, 0.005, n_days))
+        vol = rng2.lognormal(vol_level, 0.4, n_days)
+        frames[sym + ".NS"] = pd.DataFrame(
+            {"Open": openp, "High": high, "Low": low, "Close": close, "Volume": vol}, index=dates)
+    return pd.concat(frames, axis=1)
+
+
+def test_technical_filters():
+    """Liquidity/price/history filters trigger independently, same pattern
+    as the other two engines' hard-filter tests."""
+    df = pd.DataFrame({
+        "price": [500, 5, 500, 500],
+        "adtv_cr": [10, 10, 0.1, 10],
+        "n_days": [400, 400, 400, 50],
+    }, index=["OK", "FAIL_PRICE", "FAIL_LIQ", "FAIL_HISTORY"])
+    out = tech.apply_technical_filters(df.copy(), tech.TechnicalFilters())
+    assert out.loc["OK", "eligible"]
+    assert not out.loc["FAIL_PRICE", "eligible"] and "price" in out.loc["FAIL_PRICE", "fail_reasons"]
+    assert not out.loc["FAIL_LIQ", "eligible"] and "liquidity" in out.loc["FAIL_LIQ", "fail_reasons"]
+    assert not out.loc["FAIL_HISTORY", "eligible"] and "history" in out.loc["FAIL_HISTORY", "fail_reasons"]
+    print("Technical filters OK: price/liquidity/history each trigger independently")
+
+
+def test_technical_indicator_wiring_and_scoring():
+    """Full technical_factors() -> apply_technical_filters() ->
+    score_technical() against synthetic OHLCV shaped like yfinance's real
+    group_by='ticker' output - proves the DataFrame indexing/joins actually
+    line up, not just that the indicator formulas work in isolation."""
+    symbols = [f"TS{i:03d}" for i in range(25)]
+    data = _make_synthetic_ohlcv(symbols)
+    tf = tech.technical_factors(data, symbols)
+    assert len(tf) == 25
+    assert tf["rsi14"].dropna().between(0, 100).all()
+    assert (tf["adx14"].dropna() >= 0).all()
+    assert set(tf["supertrend_daily_num"].dropna().unique()).issubset({1.0, -1.0})
+
+    tf["sector"] = rng.choice(["A", "B", "C"], len(tf))
+    tf = tech.apply_technical_filters(tf, tech.TechnicalFilters(min_history_days=200))
+    assert tf["eligible"].sum() == 25, tf.loc[~tf["eligible"], "fail_reasons"]
+
+    scored = tech.score_technical(tf[tf["eligible"]].copy())
+    assert scored["SCORE"].notna().all()
+    assert scored["SCORE"].between(0, 100).all()
+    for b in tech.BUCKET_WEIGHTS_TECH:
+        assert f"score_{b}" in scored.columns
+
+    top = scored.sort_values("SCORE", ascending=False).iloc[0]
+    lines = tech._summary_lines(top)
+    assert any(l.startswith("Supertrend:") for l in lines)
+    assert any(l.startswith("Correction risk:") for l in lines)
+    print(f"Technical scoring OK: 25 synthetic stocks, SCORE range "
+          f"{scored['SCORE'].min():.1f}-{scored['SCORE'].max():.1f}, summary lines render")
+
+
+def test_technical_full_pipeline():
+    """Mocks the market-data plumbing at the technical_engine module level
+    (from-import bindings, same reasoning as the New Flow pipeline test)."""
+    symbols = [f"TSF{i:03d}" for i in range(30)]
+    data = _make_synthetic_ohlcv(symbols, seed=2)
+
+    def fake_load_universe(name):
+        return pd.DataFrame({"symbol": symbols, "name": [f"Co {s}" for s in symbols],
+                             "nse_sector": rng.choice(["Industrials", "Technology", "Healthcare"], 30)})
+
+    def fake_fetch_prices(symbols_, period="2y"):
+        return data
+
+    tech.load_universe = fake_load_universe
+    tech.fetch_prices = fake_fetch_prices
+
+    result = tech.run_technical_screen(universe="nifty250", top=10, max_per_sector=3,
+                                       cache_hours=0, log=lambda m: None)
+
+    assert result["engine"] == "technical"
+    assert result["data_mode"] == "full"  # never falls back - no fundamentals dependency
+    assert result["universe_size"] == 30
+    assert 1 <= len(result["picks"]) <= 10
+    for p in result["picks"]:
+        assert 0 <= p["SCORE"] <= 100
+        assert p["status"] in ("STRONG + HEALTHY", "STRONG", "NEUTRAL", "WEAK")
+        assert isinstance(p["summary_lines"], list) and len(p["summary_lines"]) > 0
+    assert len(result["lookup"]) == 30
+    json.dumps(result, default=str)
+    print(f"Technical full pipeline OK: {result['eligible_count']} eligible, "
+          f"{len(result['picks'])} picks, sample status={result['picks'][0]['status']}")
+
+
+def test_web_technical_mode():
+    import backend.main as web
+
+    def fake_technical_screen(**kwargs):
+        return {
+            "engine": "technical", "generated_at": "test", "universe": kwargs["universe"],
+            "universe_size": 20, "data_mode": "full", "eligible_count": 15,
+            "weights": tech.BUCKET_WEIGHTS_TECH,
+            "picks": [{"symbol": "TSTOCK", "name": "T Co", "sector": "Industrials", "SCORE": 82.0,
+                      "status": "STRONG + HEALTHY", "score_trend": 0.9, "score_momentum": 0.7,
+                      "score_volume": 0.5, "score_volatility": 0.2, "score_breakout": 0.6,
+                      "score_correction": 0.3, "data_coverage": 1.0,
+                      "summary_lines": ["Supertrend: GREEN", "RSI: 61", "Correction risk: LOW"],
+                      "price": 500.0, "rsi14": 61.0, "adx14": 28.0}],
+            "lookup": {},
+        }
+
+    web.run_technical_screen = fake_technical_screen
+
+    from fastapi.testclient import TestClient
+    client = TestClient(web.app)
+
+    cfg = client.get("/api/config").json()
+    assert "technical" in cfg["modes"]
+    assert cfg["modes"]["technical"]["engine"] == "technical"
+    assert "technical" in cfg
+    assert cfg["technical"]["weights"]["trend"] == 0.35
+    assert cfg["technical"]["filters"]["min_history_days"] == tech.MIN_BARS
+
+    r = client.post("/api/run?mode=technical")
+    assert r.json()["started"] is True
+    for _ in range(60):
+        s = client.get("/api/status").json()
+        if s["status"] in ("done", "error"):
+            break
+        time.sleep(0.03)
+    assert s["status"] == "done", s
+    assert s["mode"] == "technical"
+
+    data = client.get("/api/results?mode=technical").json()
+    assert data["engine"] == "technical"
+    assert data["picks"][0]["symbol"] == "TSTOCK"
+    assert web._result_file("technical") not in (web._result_file("broad"), web._result_file("newflow"))
+    print("Technical web integration OK: own mode, own config block, own cache file, reachable end-to-end")
+
+
+def test_progress_bar_message_parsing():
+    """The progress bar has to mean something - verify known log messages
+    from all three engines map to sensible, monotonically-useful stage
+    percentages, and that fundamentals '75/250' style messages interpolate
+    correctly within the fetch stage."""
+    import backend.main as web
+
+    assert web._progress_from_message("Loading universe: nifty250") == 5
+    assert web._progress_from_message("227 symbols in universe") == 10
+    assert web._progress_from_message("Downloading prices (OHLCV) ...") == 18
+    assert web._progress_from_message("Scoring") == 88
+    assert web._progress_from_message("Asking Gemini for commentary") == 95
+
+    # fundamentals X/Y interpolates between 30 and 70
+    p0 = web._progress_from_message("fundamentals 0/250")
+    p_mid = web._progress_from_message("fundamentals 125/250")
+    p_end = web._progress_from_message("fundamentals 250/250")
+    assert p0 == 30
+    assert 30 < p_mid < 70
+    assert p_end == 70
+
+    assert web._progress_from_message("some totally unrecognised message") is None
+
+    # _log() must never let progress_pct go backwards
+    with web._lock:
+        web._job["progress_pct"] = 50
+    web._log("Loading universe: nifty250")  # maps to 5, must NOT overwrite 50
+    with web._lock:
+        assert web._job["progress_pct"] == 50
+    web._log("Scoring")  # maps to 88, must move forward
+    with web._lock:
+        assert web._job["progress_pct"] == 88
+    print("Progress bar message parsing OK: known stages map correctly, "
+          "fundamentals X/Y interpolates, percentage never regresses")
+
+
+
+
+
 def test_web_job_flow():
     """Exercise the FastAPI app's job lifecycle with run_screen mocked out,
     so this test needs no network and no real Gemini key. Also proves the
@@ -529,4 +720,9 @@ if __name__ == "__main__":
     test_newflow_scoring_penalty_math()
     test_newflow_full_pipeline()
     test_web_newflow_mode()
+    test_technical_filters()
+    test_technical_indicator_wiring_and_scoring()
+    test_technical_full_pipeline()
+    test_web_technical_mode()
+    test_progress_bar_message_parsing()
     print("\nALL INTEGRATION TESTS PASSED")

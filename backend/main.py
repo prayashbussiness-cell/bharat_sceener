@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 import traceback
@@ -31,7 +32,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.engine_core import run_screen, BUCKET_WEIGHTS
 from backend.newflow_engine import run_newflow_screen
-from backend.pullback.api import router as pullback_router
+from backend.technical_engine import run_technical_screen
 
 from backend.gemini_summary import generate_commentary
 
@@ -45,22 +46,24 @@ os.makedirs(DATA_DIR, exist_ok=True)
 UNIVERSE_PRIMARY = os.environ.get("SCREEN_UNIVERSE_PRIMARY", "nifty100")
 UNIVERSE_BROAD = os.environ.get("SCREEN_UNIVERSE_BROAD", "nifty250")
 UNIVERSE_NEWFLOW = os.environ.get("SCREEN_UNIVERSE_NEWFLOW", "nifty250")
+UNIVERSE_TECHNICAL = os.environ.get("SCREEN_UNIVERSE_TECHNICAL", "nifty250")
 TOP_N = int(os.environ.get("SCREEN_TOP_N", "20"))
 MAX_PER_SECTOR = int(os.environ.get("SCREEN_MAX_PER_SECTOR", "4"))
 FAST_MODE = os.environ.get("SCREEN_FAST_MODE", "false").lower() == "true"
 ENABLE_GEMINI = os.environ.get("ENABLE_GEMINI", "true").lower() == "true"
 
 # Two Bharat Screener universes + one fast test mode, all using the original
-# scoring engine, plus "newflow" - a completely separate, deeper scoring
-# engine (its own factor set, hard filters, red-flag penalties - see
-# newflow_engine.py). "engine" tags which scoring code a mode uses; the
-# original three never touch newflow_engine and vice versa. Each mode gets
-# its own result cache file.
+# scoring engine; "newflow" is a separate deeper fundamentals engine; and
+# "technical" is a third, fully independent engine that needs only price
+# history (no fundamentals dependency at all - see technical_engine.py).
+# "engine" tags which scoring code a mode uses; each never touches the
+# others' scoring config. Each mode gets its own result cache file.
 MODES = {
-    "primary": {"universe": UNIVERSE_PRIMARY, "fast": FAST_MODE, "label": "Nifty 100 (primary)", "engine": "bharat"},
-    "broad":   {"universe": UNIVERSE_BROAD,   "fast": FAST_MODE, "label": "Nifty 250 (broad)", "engine": "bharat"},
-    "quick":   {"universe": "quicklist",      "fast": False,     "label": "Quick test (30 stocks)", "engine": "bharat"},
-    "newflow": {"universe": UNIVERSE_NEWFLOW, "fast": False,     "label": "New Flow 0.1", "engine": "newflow"},
+    "primary":   {"universe": UNIVERSE_PRIMARY,   "fast": FAST_MODE, "label": "Nifty 100 (primary)", "engine": "bharat"},
+    "broad":     {"universe": UNIVERSE_BROAD,     "fast": FAST_MODE, "label": "Nifty 250 (broad)", "engine": "bharat"},
+    "quick":     {"universe": "quicklist",        "fast": False,     "label": "Quick test (30 stocks)", "engine": "bharat"},
+    "newflow":   {"universe": UNIVERSE_NEWFLOW,   "fast": False,     "label": "New Flow 0.1", "engine": "newflow"},
+    "technical": {"universe": UNIVERSE_TECHNICAL, "fast": False,     "label": "Technical Analysis", "engine": "technical"},
 }
 
 
@@ -70,11 +73,6 @@ def _result_file(mode: str) -> str:
 
 app = FastAPI(title="Bharat Top Performing Stocks")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-
-# Pull Back screener - a fully independent technical-only screener (its own
-# scoring engine, job state and cache file at data/last_result_pullback.json)
-# mounted at /api/pullback/*. See backend/pullback/mount_snippet.py.
-app.include_router(pullback_router)
 
 # ---------------------------------------------------------------------------
 # In-memory job state (single worker process assumption - see README for
@@ -88,15 +86,47 @@ _job = {
     "status": "idle",      # idle | running | done | error
     "mode": None,
     "progress": "",
+    "progress_pct": 0,     # rough 0-100 estimate, see _progress_from_message
     "started_at": None,
     "finished_at": None,
     "error": None,
 }
 
+# Every engine (bharat, newflow, technical) calls the same `log(msg)`
+# callback with its own free-text progress strings. Rather than have each
+# engine report a percentage itself (which would need every engine to agree
+# on a shared scale), the web layer maps known message patterns to a rough
+# stage estimate here - one place to tune, works for all engines, and a
+# message that isn't recognised just leaves the previous percentage alone
+# instead of jumping backwards.
+_PROGRESS_STAGES = [
+    ("Loading universe", 5), ("symbols in universe", 10),
+    ("Downloading prices", 18), ("Checking whether Yahoo fundamentals", 25),
+    ("Loading cached fundamentals", 60), ("blocked from this server", 60),
+    ("Downloading fundamentals for", 30),
+    ("Applying eligibility", 78), ("Applying hard filters", 78),
+    ("Scoring", 88), ("Asking Gemini for commentary", 95),
+]
+
+
+def _progress_from_message(msg: str) -> int | None:
+    m = re.search(r"fundamentals (\d+)/(\d+)", msg)
+    if m:
+        done, total = int(m.group(1)), int(m.group(2))
+        if total > 0:
+            return int(30 + 40 * min(done / total, 1.0))  # 30 -> 70 across the fetch loop
+    for needle, pct in _PROGRESS_STAGES:
+        if needle in msg:
+            return pct
+    return None
+
 
 def _log(msg: str) -> None:
     with _lock:
         _job["progress"] = msg
+        pct = _progress_from_message(msg)
+        if pct is not None and pct > _job.get("progress_pct", 0):
+            _job["progress_pct"] = pct
     print(f"[screen] {msg}", flush=True)
 
 
@@ -105,7 +135,7 @@ def _run_job(mode: str) -> None:
     with _lock:
         if _job["status"] == "running":
             return
-        _job.update(status="running", mode=mode, progress="starting",
+        _job.update(status="running", mode=mode, progress="starting", progress_pct=0,
                     started_at=time.time(), finished_at=None, error=None)
     try:
         if cfg["engine"] == "newflow":
@@ -116,6 +146,14 @@ def _run_job(mode: str) -> None:
             # New Flow already produces deterministic, auditable Key
             # Strengths/Risks per stock (see newflow_engine.py) - it doesn't
             # need or use Gemini commentary on top of that.
+            result["commentary"] = {"per_stock": {}, "overall": ""}
+        elif cfg["engine"] == "technical":
+            result = run_technical_screen(
+                universe=cfg["universe"], top=TOP_N,
+                max_per_sector=MAX_PER_SECTOR, log=_log,
+            )
+            # Deterministic per-stock summary block, same reasoning as
+            # New Flow - no Gemini call here either.
             result["commentary"] = {"per_stock": {}, "overall": ""}
         else:
             result = run_screen(
@@ -135,7 +173,7 @@ def _run_job(mode: str) -> None:
             json.dump(result, f, indent=2, default=str)
 
         with _lock:
-            _job.update(status="done", progress="complete", finished_at=time.time())
+            _job.update(status="done", progress="complete", progress_pct=100, finished_at=time.time())
     except Exception as e:
         traceback.print_exc()
         with _lock:
@@ -204,6 +242,7 @@ def api_config():
     from backend.engine_core import Eligibility, FACTORS
     from backend.newflow_engine import HardFilters as NewFlowHardFilters, \
         BUCKET_WEIGHTS_V2, FACTORS_V2, RED_FLAG_PENALTIES
+    from backend.technical_engine import TechnicalFilters, BUCKET_WEIGHTS_TECH, FACTORS_TECH
 
     rules = asdict(Eligibility())
     factors_by_bucket: dict[str, list[str]] = {}
@@ -215,6 +254,12 @@ def api_config():
     newflow_factors_by_bucket: dict[str, list[str]] = {}
     for col, higher, bucket in FACTORS_V2:
         newflow_factors_by_bucket.setdefault(bucket, []).append(
+            f"{col} ({'higher is better' if higher else 'lower is better'})")
+
+    technical_rules = asdict(TechnicalFilters())
+    technical_factors_by_bucket: dict[str, list[str]] = {}
+    for col, higher, bucket in FACTORS_TECH:
+        technical_factors_by_bucket.setdefault(bucket, []).append(
             f"{col} ({'higher is better' if higher else 'lower is better'})")
 
     return {
@@ -231,6 +276,11 @@ def api_config():
             "factors_by_bucket": newflow_factors_by_bucket,
             "weights": BUCKET_WEIGHTS_V2,
             "red_flag_penalties": RED_FLAG_PENALTIES,
+        },
+        "technical": {
+            "filters": technical_rules,
+            "factors_by_bucket": technical_factors_by_bucket,
+            "weights": BUCKET_WEIGHTS_TECH,
         },
     }
 

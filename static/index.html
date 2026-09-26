@@ -49,14 +49,6 @@
   }
   .lede{color:var(--paper-dim);font-size:15.5px;max-width:62ch;margin:0;}
 
-  .section-nav{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px;}
-  .section-nav a{
-    font-size:12.5px;color:var(--paper-dim);text-decoration:none;
-    border:1px solid var(--hair);border-radius:var(--radius);padding:6px 12px;
-    transition:color .12s ease, border-color .12s ease;
-  }
-  .section-nav a:hover{color:var(--marigold);border-color:var(--marigold-dim);}
-
   details.rules{margin-top:22px;font-size:13.5px;color:var(--paper-dim);}
   details.rules summary{cursor:pointer;color:var(--paper);font-weight:500;padding:4px 0;}
   .rules-body{padding:12px 0 4px;}
@@ -107,6 +99,15 @@
   button.run:active{transform:scale(.98);}
   button.run:disabled{background:var(--ink-raised);color:var(--paper-dim);cursor:progress;}
   .status-line{font-size:13.5px;color:var(--paper-dim);display:flex;align-items:center;gap:8px;}
+  .progress-track{
+    width:100%;max-width:360px;height:5px;background:var(--ink-raised);
+    border-radius:3px;overflow:hidden;margin-top:8px;display:none;
+  }
+  .progress-track.show{display:block;}
+  .progress-fill{
+    height:100%;background:var(--marigold);width:0%;
+    transition:width .4s ease;
+  }
   .dot{width:7px;height:7px;border-radius:50%;background:var(--paper-dim);flex:none;}
   .dot.running{background:var(--marigold);animation:pulse 1.1s ease-in-out infinite;}
   .dot.done{background:var(--jade);}
@@ -146,15 +147,6 @@
 
   .empty{padding:36px 0;color:var(--paper-dim);font-size:14px;max-width:52ch;}
 
-  /* --- Pull Back panel -------------------------------------------------- */
-  .pb-controls-extra{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px;}
-  .pb-note{color:var(--paper-dim);font-size:13.5px;max-width:66ch;margin:14px 0 0;}
-  .detail-link{color:var(--marigold-dim);font-size:11.5px;cursor:pointer;margin-top:8px;display:inline-block;}
-  .detail-link:hover{color:var(--marigold);}
-  .pb-detail{margin-top:12px;padding:14px 16px;border:1px solid var(--hair);border-radius:var(--radius);
-    background:var(--ink-raised);font-family:'IBM Plex Mono',monospace;font-size:11px;
-    white-space:pre-wrap;color:var(--paper-dim);max-height:420px;overflow:auto;}
-
   footer{padding:28px 0 56px;font-size:12.5px;color:var(--paper-dim);}
   footer p{max-width:72ch;margin:0 0 10px;}
 
@@ -177,14 +169,6 @@
       live market data — nothing here is pre-written.
     </p>
 
-    <nav class="section-nav">
-      <a href="#panel-primary">Nifty 100</a>
-      <a href="#panel-broad">Nifty 250</a>
-      <a href="#panel-newflow">New Flow 0.1</a>
-      <a href="#panel-pullback">Pull Back</a>
-      <a href="#panel-quick">Quick test</a>
-    </nav>
-
     <details class="rules">
       <summary>Screening rules &amp; weights used</summary>
       <div id="rulesBody" class="rules-body">Loading…</div>
@@ -196,7 +180,7 @@
         <option value="primary">in Nifty 100 (primary) scan</option>
         <option value="broad" selected>in Nifty 250 (broad) scan</option>
         <option value="newflow">in New Flow 0.1 scan</option>
-        <option value="pullback">in Pull Back scan</option>
+        <option value="technical">in Technical Analysis scan</option>
       </select>
       <button id="lookupBtn">Check</button>
     </div>
@@ -231,7 +215,7 @@ function fmtNum(x,d=1){ return x===null||x===undefined ? '—' : Number(x).toFix
 
 function panelHtml(p){
   return `
-    <section class="panel" id="panel-${p.mode}" data-mode="${p.mode}">
+    <section class="panel" data-mode="${p.mode}">
       <div class="panel-head">
         <div class="panel-title">${p.title}<span class="panel-tag">${p.tag}</span></div>
       </div>
@@ -239,6 +223,7 @@ function panelHtml(p){
         <button class="run" id="run-${p.mode}">${p.buttonLabel}</button>
         <div class="status-line"><span class="dot" id="dot-${p.mode}"></span><span id="statusText-${p.mode}">Not run yet</span></div>
       </div>
+      <div class="progress-track" id="progress-${p.mode}"><div class="progress-fill" id="progressFill-${p.mode}"></div></div>
       <div class="meta" id="meta-${p.mode}"></div>
       <div class="banner" id="banner-${p.mode}"></div>
       <section class="overall" id="overall-${p.mode}"><p id="overallText-${p.mode}"></p></section>
@@ -256,7 +241,7 @@ document.getElementById('panels').innerHTML = PANELS.map(panelHtml).join('');
 // sub-scores, Key Strengths/Risks, red-flag penalties) - so it gets its own
 // template and renderer rather than reusing panelHtml()/render().
 document.getElementById('panels').insertAdjacentHTML('beforeend', `
-  <section class="panel" id="panel-newflow" data-mode="newflow">
+  <section class="panel" data-mode="newflow">
     <div class="panel-head">
       <div class="panel-title">New Flow 0.1<span class="panel-tag" style="color:var(--jade);border-color:var(--jade);">deep scan</span></div>
     </div>
@@ -264,6 +249,7 @@ document.getElementById('panels').insertAdjacentHTML('beforeend', `
       <button class="run" id="run-newflow">Run New Flow 0.1</button>
       <div class="status-line"><span class="dot" id="dot-newflow"></span><span id="statusText-newflow">Not run yet</span></div>
     </div>
+    <div class="progress-track" id="progress-newflow"><div class="progress-fill" id="progressFill-newflow"></div></div>
     <div class="meta" id="meta-newflow"></div>
     <div class="banner" id="banner-newflow"></div>
     <details class="rules" style="margin-top:16px;">
@@ -277,53 +263,51 @@ document.getElementById('panels').insertAdjacentHTML('beforeend', `
   </section>
 `);
 
-// Pull Back - technical-only setup screener (Trend -> Impulse -> Controlled
-// pullback -> Seller exhaustion -> Trigger). Its own engine, own job/cache on
-// the backend (/api/pullback/*), so it gets its own template, renderer and
-// poll loop rather than reusing the primary/broad ALL_MODES machinery.
+// Technical Analysis - third independent engine, price/volume only (no
+// fundamentals dependency, so it's immune to the Yahoo crumb-blocking issue
+// that affects the other two). Own template: 6 sub-scores + a deterministic
+// summary block, not a Key Strengths/Risks list.
 document.getElementById('panels').insertAdjacentHTML('beforeend', `
-  <section class="panel" id="panel-pullback" data-mode="pullback">
+  <section class="panel" data-mode="technical">
     <div class="panel-head">
-      <div class="panel-title">Pull Back<span class="panel-tag" style="color:var(--jade);border-color:var(--jade);">technical only</span></div>
+      <div class="panel-title">Technical Analysis<span class="panel-tag" style="color:#6ab0e0;border-color:#6ab0e0;">price/volume only</span></div>
     </div>
     <div class="controls">
-      <button class="run" id="run-pullback">Run Pull Back scan</button>
-      <div class="status-line"><span class="dot" id="dot-pullback"></span><span id="statusText-pullback">Not run yet</span></div>
+      <button class="run" id="run-technical">Run Technical Analysis</button>
+      <div class="status-line"><span class="dot" id="dot-technical"></span><span id="statusText-technical">Not run yet</span></div>
     </div>
-    <div class="pb-controls-extra">
-      <button class="run" id="run-pullback-quick" style="background:transparent;border:1px solid var(--hair);color:var(--paper);">Quick scan (curated watchlist)</button>
-      <input type="text" id="pbLookupInput" placeholder="Check a specific stock, e.g. RELIANCE" autocomplete="off"
-        style="background:var(--ink-raised);border:1px solid var(--hair);color:var(--paper);font-family:'IBM Plex Mono',monospace;font-size:13px;padding:9px 12px;border-radius:var(--radius);width:230px;">
-      <button id="pbLookupBtn" style="background:transparent;border:1px solid var(--hair);color:var(--paper);font-family:'Work Sans',sans-serif;font-size:13px;padding:9px 16px;border-radius:var(--radius);cursor:pointer;">Check</button>
-    </div>
-    <div class="meta" id="meta-pullback"></div>
-    <p class="pb-note">Established uptrend &rarr; controlled pullback &rarr; seller exhaustion &rarr;
-      confirmed reversal trigger, technical factors only. States run
-      NO_SETUP &rarr; WATCHLIST &rarr; PULLBACK_DEVELOPING &rarr; PULLBACK_SETUP &rarr; ENTRY_TRIGGER;
-      a stock that breaks major support is always INVALIDATED regardless of score.</p>
-    <div id="pbLookupResult" class="lookup-result"></div>
-    <div class="list" id="list-pullback">
-      <div class="empty">No results yet. Click "Run Pull Back scan" to fetch live prices and
-        evaluate the trend &rarr; pullback &rarr; seller-exhaustion &rarr; trigger sequence.</div>
+    <div class="progress-track" id="progress-technical"><div class="progress-fill" id="progressFill-technical"></div></div>
+    <div class="meta" id="meta-technical"></div>
+    <div class="banner" id="banner-technical"></div>
+    <details class="rules" style="margin-top:16px;">
+      <summary>~30 indicators &amp; bucket weights (Technical Analysis only)</summary>
+      <div id="technicalRulesBody" class="rules-body">Loading…</div>
+    </details>
+    <div class="list" id="list-technical" style="margin-top:14px;">
+      <div class="empty">No results yet. Trend 35% / Momentum 20% / Volume 15% /
+        Volatility 10% / Breakout 10% / Correction 10% - pure price &amp; volume,
+        no fundamentals needed.</div>
     </div>
   </section>
 `);
 
 // small utility quick-scan link at the bottom, doesn't need its own full panel
 document.getElementById('panels').insertAdjacentHTML('beforeend', `
-  <section class="panel" id="panel-quick" style="padding-top:28px;padding-bottom:28px;">
+  <section class="panel" style="padding-top:28px;padding-bottom:28px;">
     <div class="controls">
       <button class="run" id="run-quick" style="background:transparent;border:1px solid var(--hair);color:var(--paper);">Quick test scan (30 stocks, ~1 min)</button>
       <div class="status-line"><span class="dot" id="dot-quick"></span><span id="statusText-quick">Not run yet</span></div>
     </div>
+    <div class="progress-track" id="progress-quick"><div class="progress-fill" id="progressFill-quick"></div></div>
     <div class="meta" id="meta-quick"></div>
     <div class="banner" id="banner-quick"></div>
     <section class="overall" id="overall-quick"><p id="overallText-quick"></p></section>
     <div class="list" id="list-quick"></div>
   </section>
+
 `);
 
-const ALL_MODES = ['primary', 'broad', 'newflow', 'quick'];
+const ALL_MODES = ['primary', 'broad', 'newflow', 'technical', 'quick'];
 const pollers = {};
 
 function render(mode, data){
@@ -479,166 +463,75 @@ async function loadNewFlowRules(){
 }
 loadNewFlowRules();
 
-// --- Pull Back panel: own engine, own job/cache endpoints, own poll loop ---
-const PB_STATE_COLORS = {
-  ENTRY_TRIGGER: 'var(--jade)',
-  PULLBACK_SETUP: 'var(--marigold)',
-  PULLBACK_DEVELOPING: 'var(--marigold-dim)',
-  WATCHLIST: 'var(--paper-dim)',
-  NO_SETUP: 'var(--paper-dim)',
-  INVALIDATED: 'var(--rose)',
-};
-let pbPoller = null;
-let pbLastPayload = null;
-
-function pbRenderList(payload){
-  pbLastPayload = payload;
-  const listEl = document.getElementById('list-pullback');
-  const results = payload.results || [];
-  if(!results.length){
-    listEl.innerHTML = '<div class="empty">No stocks reached a scored state this run.</div>';
+function renderTechnical(data){
+  document.getElementById('meta-technical').innerHTML = `
+    <div><b>${data.universe}</b> universe · ${data.universe_size} names</div>
+    <div><b>${data.eligible_count}</b> passed filters</div>
+    <div>as of <b>${data.generated_at || ''}</b></div>
+  `;
+  const listEl = document.getElementById('list-technical');
+  if(!data.picks || !data.picks.length){
+    listEl.innerHTML = '<div class="empty">No stocks passed the technical filters this run.</div>';
     return;
   }
-  listEl.innerHTML = results.map((r, i) => {
-    const color = PB_STATE_COLORS[r.state] || 'var(--paper-dim)';
-    const pb = r.pullback || {}, sup = r.support || {}, mom = r.momentum || {},
-          ent = r.entry || {}, ext = r.overextension || {};
-    const warnings = (r.warnings || []).map(w => `<div>&#9888; ${w}</div>`).join('');
+  const statusEmoji = { 'STRONG + HEALTHY': '🟢', 'STRONG': '🟢', 'NEUTRAL': '🟡', 'WEAK': '🔴' };
+  listEl.innerHTML = data.picks.map((p, i) => {
+    const emoji = statusEmoji[p.status] || '';
+    const lines = (p.summary_lines || []).map(l => `<div>${l}</div>`).join('');
     return `
-      <div class="row">
+      <div class="row" style="grid-template-columns:36px 1fr auto;">
         <div class="rank">${String(i+1).padStart(2,'0')}</div>
         <div class="name-block">
-          <div class="sym">${r.symbol}</div>
-          <div class="sector" style="color:${color};border-color:${color};">${r.state.replace(/_/g,' ')}</div>
-          ${warnings ? `<div class="rationale">${warnings}</div>` : ''}
-          <span class="detail-link" data-sym="${r.symbol}">view full breakdown</span>
-          <div class="pb-detail" id="pbdetail-${r.symbol}" style="display:none;"></div>
+          <div class="sym">${p.symbol}</div>
+          <div class="co">${p.name || ''}</div>
+          <div class="sector">${p.sector || 'Unknown'}</div>
+          <div class="rationale">${lines}</div>
         </div>
         <div class="score-block">
-          <div class="score">${fmtNum(r.score,1)}<span> /100</span></div>
+          <div class="score">${fmtNum(p.SCORE,1)}<span> /100</span></div>
+          <div style="font-size:12px;margin-top:4px;">${emoji} ${p.status || ''}</div>
           <div class="subscores">
-            Pullback <b>${fmtNum(pb.pullback_pct,1)}%</b> · ATR <b>${fmtNum(pb.pullback_atr,2)}</b><br>
-            Support <b>${sup.support_confluence_count ?? '—'}</b> groups · RSI <b>${fmtNum(mom.rsi14,1)}</b><br>
-            Trigger <b>${ent.trigger_tier || 'none'}</b> · ${ext.status || '—'}
+            Trend <b>${fmtNum(p.score_trend,2)}</b> · Mom <b>${fmtNum(p.score_momentum,2)}</b><br>
+            Vol <b>${fmtNum(p.score_volume,2)}</b> · VIX <b>${fmtNum(p.score_volatility,2)}</b><br>
+            Brk <b>${fmtNum(p.score_breakout,2)}</b> · Corr <b>${fmtNum(p.score_correction,2)}</b>
           </div>
         </div>
       </div>
     `;
   }).join('');
-  listEl.querySelectorAll('.detail-link').forEach(el => el.addEventListener('click', () => {
-    const sym = el.dataset.sym;
-    const d = document.getElementById('pbdetail-' + sym);
-    if(d.style.display === 'none'){
-      const r = results.find(x => x.symbol === sym);
-      d.textContent = JSON.stringify(r, null, 2);
-      d.style.display = 'block';
-      el.textContent = 'hide full breakdown';
-    } else {
-      d.style.display = 'none';
-      el.textContent = 'view full breakdown';
-    }
-  }));
 }
 
-function pbUpdateMeta(payload){
-  document.getElementById('meta-pullback').innerHTML = `
-    <div><b>${payload.universe || '—'}</b> universe${payload.quick ? ' (quick)' : ''} · ${payload.count ?? 0} scanned</div>
-    <div>as of <b>${payload.generated_at || ''}</b></div>
-    ${payload.errors && payload.errors.length ? `<div>${payload.errors.length} symbol(s) skipped (no data)</div>` : ''}
-  `;
-}
-
-async function pbLoadCached(){
+async function loadTechnicalRules(){
   try{
-    const r = await fetch('/api/pullback/results');
-    if(r.ok){
-      const data = await r.json();
-      pbUpdateMeta(data);
-      pbRenderList(data);
-    }
-  }catch(e){}
-}
-
-async function pbPollStatus(){
-  const r = await fetch('/api/pullback/status');
-  const s = await r.json();
-  const dot = document.getElementById('dot-pullback');
-  const txt = document.getElementById('statusText-pullback');
-  const btn = document.getElementById('run-pullback');
-  const qbtn = document.getElementById('run-pullback-quick');
-  if(s.status === 'running'){
-    dot.className = 'dot running';
-    const p = s.progress || {};
-    txt.textContent = p.total ? `Running (${p.done}/${p.total})` : 'Running…';
-    btn.disabled = true; qbtn.disabled = true;
-  } else {
-    btn.disabled = false; qbtn.disabled = false;
-    clearInterval(pbPoller);
-    if(s.status === 'done'){
-      dot.className = 'dot done';
-      txt.textContent = 'Last run complete';
-      const rr = await fetch('/api/pullback/results');
-      if(rr.ok){
-        const data = await rr.json();
-        pbUpdateMeta(data);
-        pbRenderList(data);
-      }
-    } else if(s.status === 'error'){
-      dot.className = 'dot error';
-      txt.textContent = 'Failed: ' + (s.error || 'unknown error');
-    }
-  }
-}
-
-async function pbStartRun(quick){
-  document.getElementById('run-pullback').disabled = true;
-  document.getElementById('run-pullback-quick').disabled = true;
-  document.getElementById('statusText-pullback').textContent = 'Starting…';
-  document.getElementById('dot-pullback').className = 'dot running';
-  const universe = quick ? 'quicklist' : 'nifty250';
-  await fetch(`/api/pullback/run?universe=${universe}&quick=${quick}`, {method:'POST'});
-  clearInterval(pbPoller);
-  pbPoller = setInterval(pbPollStatus, 1800);
-}
-
-document.getElementById('run-pullback').addEventListener('click', () => pbStartRun(false));
-document.getElementById('run-pullback-quick').addEventListener('click', () => pbStartRun(true));
-
-document.getElementById('pbLookupBtn').addEventListener('click', pbDoLookup);
-document.getElementById('pbLookupInput').addEventListener('keydown', e => { if(e.key === 'Enter') pbDoLookup(); });
-
-async function pbDoLookup(){
-  const input = document.getElementById('pbLookupInput');
-  const sym = input.value.trim().toUpperCase();
-  if(!sym) return;
-  const resultEl = document.getElementById('pbLookupResult');
-  resultEl.textContent = 'Checking…';
-  try{
-    const r = await fetch('/api/pullback/lookup/' + encodeURIComponent(sym));
-    if(!r.ok){
-      const j = await r.json().catch(() => ({}));
-      resultEl.textContent = j.detail || `${sym} — no usable price data.`;
-      return;
-    }
-    const d = await r.json();
-    const color = PB_STATE_COLORS[d.state] || 'var(--paper-dim)';
-    resultEl.innerHTML = `<span style="color:${color};"><b>${sym}</b> — ${d.state.replace(/_/g,' ')}</span>` +
-      ` · score <b>${fmtNum(d.score,1)}</b>/100`;
-    pbRenderList({ results: [Object.assign({ symbol: sym }, d)] });
+    const r = await fetch('/api/config');
+    const c = await r.json();
+    const t = c.technical || {};
+    const f = t.filters || {};
+    const rows = [
+      ['Min price', '≥ ₹' + f.min_price],
+      ['Min daily turnover', '≥ ₹' + f.min_adtv_cr + ' cr'],
+      ['Min history', '≥ ' + f.min_history_days + ' trading days (needed for 200 DMA)'],
+    ];
+    const w = t.weights || {};
+    const weightsLine = Object.entries(w).map(([k,v]) => `${k} ${Math.round(v*100)}%`).join(' · ');
+    document.getElementById('technicalRulesBody').innerHTML =
+      '<table>' + rows.map(([k,v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('') + '</table>' +
+      `<div class="weights-note">Bucket weights: ${weightsLine}</div>` +
+      `<div class="exempt-note">Scores here are relative to this run's universe, not fixed % thresholds - a stock's "Correction risk" reflects how stretched it is compared to its peers in this scan, not an absolute cutoff.</div>`;
   }catch(e){
-    resultEl.textContent = 'Lookup failed.';
+    document.getElementById('technicalRulesBody').textContent = 'Could not load rules.';
   }
 }
-
-pbLoadCached();
-pbPollStatus();
+loadTechnicalRules();
 
 async function loadCached(mode){
   try{
     const r = await fetch('/api/results?mode=' + mode);
     if(r.ok){
       const data = await r.json();
-      if(mode === 'newflow') renderNewFlow(data); else render(mode, data);
+      if(mode === 'newflow') renderNewFlow(data);
+      else if(mode === 'technical') renderTechnical(data);
+      else render(mode, data);
     }
   }catch(e){}
 }
@@ -650,27 +543,35 @@ async function pollStatus(){
     const dot = document.getElementById('dot-' + mode);
     const txt = document.getElementById('statusText-' + mode);
     const btn = document.getElementById('run-' + mode);
+    const track = document.getElementById('progress-' + mode);
+    const fill = document.getElementById('progressFill-' + mode);
     if(s.status === 'running' && s.mode === mode){
       dot.className = 'dot running';
       txt.textContent = s.progress || 'Running…';
       btn.disabled = true;
+      if(track){ track.classList.add('show'); }
+      if(fill){ fill.style.width = (s.progress_pct || 0) + '%'; }
     } else if(s.status === 'running'){
       // a different mode is running - disable this button too (one scan at a time)
       btn.disabled = true;
-      if(dot.className.indexOf('running') === -1){ /* leave prior state text alone */ }
     } else {
       btn.disabled = false;
+      if(track && s.mode !== mode){ track.classList.remove('show'); }
       if(s.status === 'done' && s.mode === mode){
         dot.className = 'dot done';
         txt.textContent = 'Last run complete';
+        if(track){ if(fill) fill.style.width = '100%'; setTimeout(() => track.classList.remove('show'), 600); }
         const rr = await fetch('/api/results?mode=' + mode);
         if(rr.ok){
           const data = await rr.json();
-          if(mode === 'newflow') renderNewFlow(data); else render(mode, data);
+          if(mode === 'newflow') renderNewFlow(data);
+          else if(mode === 'technical') renderTechnical(data);
+          else render(mode, data);
         }
       } else if(s.status === 'error' && s.mode === mode){
         dot.className = 'dot error';
         txt.textContent = 'Failed: ' + (s.error || 'unknown error');
+        if(track) track.classList.remove('show');
       }
     }
   }
@@ -680,7 +581,7 @@ async function pollStatus(){
 
 function startPolling(){
   clearInterval(pollers.main);
-  pollers.main = setInterval(pollStatus, 1800);
+  pollers.main = setInterval(pollStatus, 1200);
 }
 
 async function startRun(mode){
@@ -688,6 +589,10 @@ async function startRun(mode){
   document.getElementById('statusText-' + mode).textContent = 'Starting…';
   document.getElementById('dot-' + mode).className = 'dot running';
   document.getElementById('banner-' + mode).classList.remove('show');
+  const track = document.getElementById('progress-' + mode);
+  const fill = document.getElementById('progressFill-' + mode);
+  if(track) track.classList.add('show');
+  if(fill) fill.style.width = '2%';
   await fetch('/api/run?mode=' + mode, {method:'POST'});
   startPolling();
 }
@@ -695,6 +600,7 @@ async function startRun(mode){
 document.getElementById('run-primary').addEventListener('click', () => startRun('primary'));
 document.getElementById('run-broad').addEventListener('click', () => startRun('broad'));
 document.getElementById('run-newflow').addEventListener('click', () => startRun('newflow'));
+document.getElementById('run-technical').addEventListener('click', () => startRun('technical'));
 document.getElementById('run-quick').addEventListener('click', () => startRun('quick'));
 
 ALL_MODES.forEach(loadCached);
@@ -741,28 +647,6 @@ async function doLookup(){
   if(!sym) return;
   const mode = lookupModeSel.value;
   lookupResult.textContent = 'Checking…';
-
-  // Pull Back has its own engine/endpoint and result shape (state machine,
-  // not eligible/ineligible), so it's handled separately here.
-  if(mode === 'pullback'){
-    try{
-      const r = await fetch('/api/pullback/lookup/' + encodeURIComponent(sym));
-      if(!r.ok){
-        const j = await r.json().catch(() => ({}));
-        lookupResult.textContent = j.detail || `${sym} — no usable price data.`;
-        return;
-      }
-      const d = await r.json();
-      const color = PB_STATE_COLORS[d.state] || 'var(--paper-dim)';
-      lookupResult.innerHTML = `<span style="color:${color};"><b>${sym}</b> — ${d.state.replace(/_/g,' ')}</span>` +
-        ` · score <b>${fmtNum(d.score,1)}</b>/100`;
-      pbRenderList({ results: [Object.assign({ symbol: sym }, d)] });
-    }catch(e){
-      lookupResult.textContent = 'Lookup failed.';
-    }
-    return;
-  }
-
   try{
     const r = await fetch('/api/lookup/' + encodeURIComponent(sym) + '?mode=' + mode);
     if(r.status === 404){
